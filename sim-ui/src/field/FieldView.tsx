@@ -4,7 +4,7 @@
 // angles counter-clockwise in radians — exactly like the robot code. The
 // y-flip to screen coordinates happens once, here.
 import { createContext, useCallback, useContext, useMemo, useRef, type ReactNode } from 'react';
-import { FIELDS, getTags, type FieldElement, type Variant } from './fieldData';
+import { FIELD, FIELDS, getTags, type FieldElement, type Variant } from './fieldData';
 import { useNTFrame } from '../nt/store';
 
 const MARGIN = 0.45; // meters of space around the field
@@ -123,7 +123,8 @@ export function FieldView({ variant, children, showTagIds = true, onPointerDown,
           )}
 
           {v.elements.map((e) => <Element key={e.id} el={e} />)}
-          {(['blue', 'red'] as const).map((a) => <HubOpening key={a} at={v.hubCenters[a]} alliance={a} />)}
+          {/* HUB openings: only on fields with HUBs (not the B8 practice space) */}
+          {v.hubCenters && (['blue', 'red'] as const).map((a) => <HubOpening key={a} at={v.hubCenters![a]} alliance={a} />)}
 
           {/* AprilTags: short bar on the mounting face + tick showing which way it faces */}
           {tags.map((t) => {
