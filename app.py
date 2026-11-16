@@ -66,12 +66,53 @@ CREATE TABLE IF NOT EXISTS item_images (
     original_name TEXT DEFAULT '',
     created_at    TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS item_groups (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    name       TEXT UNIQUE NOT NULL COLLATE NOCASE,
+    notes      TEXT DEFAULT '',
+    created_at TEXT NOT NULL
+);
+-- How many of an item are in use, per group (group_id NULL = in use, no group).
+CREATE TABLE IF NOT EXISTS usage (
+    id       INTEGER PRIMARY KEY AUTOINCREMENT,
+    item_id  INTEGER NOT NULL REFERENCES items(id) ON DELETE CASCADE,
+    group_id INTEGER REFERENCES item_groups(id) ON DELETE CASCADE,
+    quantity INTEGER NOT NULL CHECK (quantity > 0)
+);
+-- Tools lent to a person. Open while returned_at is NULL.
+CREATE TABLE IF NOT EXISTS checkouts (
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    item_id        INTEGER NOT NULL REFERENCES items(id) ON DELETE CASCADE,
+    person         TEXT NOT NULL,
+    quantity       INTEGER NOT NULL CHECK (quantity > 0),
+    note           TEXT DEFAULT '',
+    due_at         TEXT,
+    checked_out_at TEXT NOT NULL,
+    returned_at    TEXT,
+    return_note    TEXT DEFAULT ''
+);
+"""
+
+# Items with their in-use, checked-out and available counts. Recreated on startup.
+ITEM_VIEW = """
+DROP VIEW IF EXISTS item_view;
+CREATE VIEW item_view AS
+SELECT i.*,
+       COALESCE(u.n, 0) AS in_use,
+       COALESCE(c.n, 0) AS checked_out,
+       i.quantity - COALESCE(u.n, 0) - COALESCE(c.n, 0) AS available
+FROM items i
+LEFT JOIN (SELECT item_id, SUM(quantity) AS n FROM usage GROUP BY item_id) u
+       ON u.item_id = i.id
+LEFT JOIN (SELECT item_id, SUM(quantity) AS n FROM checkouts
+           WHERE returned_at IS NULL GROUP BY item_id) c
+       ON c.item_id = i.id;
 """
 
 ITEM_FIELDS = ("sku", "name", "category", "location", "quantity",
                "reorder_level", "unit_price", "notes")
 CATEGORY_FIELDS = ("name", "color", "description",
-                   "default_reorder_level", "default_location")
+                   "default_reorder_level", "default_location", "checkout")
 
 
 # ---------- database helpers ----------
@@ -95,6 +136,21 @@ def init_db():
     UPLOAD_DIR.mkdir(exist_ok=True)
     with sqlite3.connect(DB_PATH) as db:
         db.executescript(SCHEMA)
+        # movements.kind: 'stock' (total changed), 'in_use' or 'return'
+        cols = [r[1] for r in db.execute("PRAGMA table_info(movements)")]
+        if "kind" not in cols:
+            db.execute("ALTER TABLE movements ADD COLUMN kind TEXT NOT NULL DEFAULT 'stock'")
+        # categories.checkout: items in the category show on the Checkout page
+        cols = [r[1] for r in db.execute("PRAGMA table_info(categories)")]
+        if "checkout" not in cols:
+            db.execute("ALTER TABLE categories ADD COLUMN checkout INTEGER NOT NULL DEFAULT 0")
+        if db.execute("PRAGMA user_version").fetchone()[0] < 1:
+            # One-time: a Tools category for checkout (can be renamed or deleted later).
+            db.execute("INSERT OR IGNORE INTO categories (name, color, default_location, checkout) "
+                       "VALUES ('Tools', '#d97706', 'Site room', 1)")
+            db.execute("UPDATE categories SET checkout = 1 WHERE name = 'Tools'")
+            db.execute("PRAGMA user_version = 1")
+        db.executescript(ITEM_VIEW)
         # Categories typed on items before category config existed.
         db.execute(
             "INSERT OR IGNORE INTO categories (name) "
@@ -176,6 +232,8 @@ def clean_category(data, partial=False):
             v = str(v or "").strip()
             if not re.fullmatch(r"#[0-9a-fA-F]{6}", v):
                 return None, "color must look like #1a2b3c"
+        elif f == "checkout":
+            v = 1 if v in (True, 1, "1", "true", "on") else 0
         else:
             v = str(v or "").strip()
         out[f] = v
@@ -197,11 +255,11 @@ def save_links(db, item_id, links):
     )
 
 
-def log_movement(db, item_id, change, reason, qty_after):
+def log_movement(db, item_id, change, reason, qty_after, kind="stock"):
     db.execute(
-        "INSERT INTO movements (item_id, change, reason, qty_after, created_at) "
-        "VALUES (?, ?, ?, ?, ?)",
-        (item_id, change, reason, qty_after, now()),
+        "INSERT INTO movements (item_id, change, reason, qty_after, kind, created_at) "
+        "VALUES (?, ?, ?, ?, ?, ?)",
+        (item_id, change, reason, qty_after, kind, now()),
     )
 
 
@@ -222,16 +280,27 @@ def with_extras(db, rows):
         links.setdefault(r["item_id"], []).append({"label": r["label"], "url": r["url"]})
     for r in db.execute(f"SELECT * FROM item_images WHERE item_id IN ({marks}) ORDER BY id", ids):
         images.setdefault(r["item_id"], []).append(image_json(r))
-    colors = {r["name"].lower(): r["color"] for r in db.execute("SELECT name, color FROM categories")}
+    usage = {}
+    for r in db.execute(
+        f"SELECT u.item_id, u.group_id, u.quantity, g.name AS group_name FROM usage u "
+        f"LEFT JOIN item_groups g ON g.id = u.group_id WHERE u.item_id IN ({marks}) "
+        f"ORDER BY g.name COLLATE NOCASE", ids,
+    ):
+        usage.setdefault(r["item_id"], []).append(
+            {"group_id": r["group_id"], "group_name": r["group_name"], "quantity": r["quantity"]})
+    cats = {r["name"].lower(): r for r in db.execute("SELECT name, color, checkout FROM categories")}
     for i in items:
         i["links"] = links.get(i["id"], [])
         i["images"] = images.get(i["id"], [])
-        i["category_color"] = colors.get((i["category"] or "").lower())
+        i["usage"] = usage.get(i["id"], [])
+        cat = cats.get((i["category"] or "").lower())
+        i["category_color"] = cat["color"] if cat else None
+        i["is_tool"] = bool(cat and cat["checkout"])
     return items
 
 
 def fetch_item(db, item_id):
-    row = db.execute("SELECT * FROM items WHERE id = ?", (item_id,)).fetchone()
+    row = db.execute("SELECT * FROM item_view WHERE id = ?", (item_id,)).fetchone()
     return with_extras(db, [row])[0] if row else None
 
 
@@ -254,8 +323,9 @@ def list_items():
     q = request.args.get("q", "").strip()
     category = request.args.get("category", "").strip()
     low_only = request.args.get("low") == "1"
+    tools_only = request.args.get("tools") == "1"
 
-    sql = "SELECT * FROM items WHERE 1=1"
+    sql = "SELECT * FROM item_view WHERE 1=1"
     params = []
     if q:
         sql += " AND (name LIKE ? OR sku LIKE ? OR location LIKE ? OR notes LIKE ?)"
@@ -264,7 +334,10 @@ def list_items():
         sql += " AND category = ? COLLATE NOCASE"
         params.append(category)
     if low_only:
-        sql += " AND quantity <= reorder_level"
+        sql += " AND available <= reorder_level"
+    if tools_only:
+        sql += (" AND EXISTS (SELECT 1 FROM categories c "
+                "WHERE c.checkout = 1 AND c.name = item_view.category)")
     sql += " ORDER BY name COLLATE NOCASE"
 
     db = get_db()
@@ -319,9 +392,13 @@ def update_item(item_id):
     if err:
         return jsonify(error=err), 400
     db = get_db()
-    old = db.execute("SELECT * FROM items WHERE id = ?", (item_id,)).fetchone()
+    old = db.execute("SELECT * FROM item_view WHERE id = ?", (item_id,)).fetchone()
     if not old:
         return jsonify(error="Not found"), 404
+    busy = old["in_use"] + old["checked_out"]
+    if data.get("quantity", old["quantity"]) < busy:
+        return jsonify(error=f"{busy} are in use or checked out, so the total can't go "
+                             "below that. Return them first."), 400
 
     if data:
         data["updated_at"] = now()
@@ -369,18 +446,288 @@ def adjust_stock(item_id):
     reason = str(body.get("reason", "")).strip()
 
     db = get_db()
-    item = db.execute("SELECT * FROM items WHERE id = ?", (item_id,)).fetchone()
+    item = db.execute("SELECT * FROM item_view WHERE id = ?", (item_id,)).fetchone()
     if not item:
         return jsonify(error="Not found"), 404
     new_qty = item["quantity"] + change
-    if new_qty < 0:
-        return jsonify(error=f"Only {item['quantity']} in stock"), 400
+    if new_qty < item["in_use"] + item["checked_out"]:
+        return jsonify(error=f"Only {item['available']} available to remove "
+                             f"(the rest are in use or checked out)"), 400
 
     db.execute("UPDATE items SET quantity = ?, updated_at = ? WHERE id = ?",
                (new_qty, now(), item_id))
     log_movement(db, item_id, change, reason, new_qty)
     db.commit()
     return jsonify(fetch_item(db, item_id))
+
+
+# ---------- in use / groups API ----------
+
+def parse_use_body(db, body):
+    """Returns (quantity, group_row_or_None, note, error)."""
+    try:
+        qty = int(body.get("quantity", 0))
+    except (TypeError, ValueError):
+        return None, None, None, "quantity must be a whole number"
+    if qty <= 0:
+        return None, None, None, "quantity must be at least 1"
+    group = None
+    if body.get("group_id") not in (None, ""):
+        group = db.execute("SELECT * FROM item_groups WHERE id = ?",
+                           (body["group_id"],)).fetchone()
+        if not group:
+            return None, None, None, "Group not found"
+    return qty, group, str(body.get("note", "")).strip(), None
+
+
+def usage_reason(group, note):
+    label = group["name"] if group else "No group"
+    return f"{label} · {note}" if note else label
+
+
+@app.post("/api/items/<int:item_id>/use")
+def mark_in_use(item_id):
+    """Body: {"quantity": 2, "group_id": 1 | null, "note": ""}. Total is unchanged."""
+    db = get_db()
+    item = db.execute("SELECT * FROM item_view WHERE id = ?", (item_id,)).fetchone()
+    if not item:
+        return jsonify(error="Not found"), 404
+    qty, group, note, err = parse_use_body(db, request.get_json(force=True) or {})
+    if err:
+        return jsonify(error=err), 400
+    if qty > item["available"]:
+        return jsonify(error=f"Only {item['available']} available"), 400
+
+    gid = group["id"] if group else None
+    row = db.execute("SELECT id FROM usage WHERE item_id = ? AND group_id IS ?",
+                     (item_id, gid)).fetchone()
+    if row:
+        db.execute("UPDATE usage SET quantity = quantity + ? WHERE id = ?", (qty, row["id"]))
+    else:
+        db.execute("INSERT INTO usage (item_id, group_id, quantity) VALUES (?, ?, ?)",
+                   (item_id, gid, qty))
+    log_movement(db, item_id, qty, usage_reason(group, note), item["quantity"], "in_use")
+    db.commit()
+    return jsonify(fetch_item(db, item_id))
+
+
+@app.post("/api/items/<int:item_id>/return")
+def return_from_use(item_id):
+    """Body: {"quantity": 2, "group_id": 1 | null, "note": ""}"""
+    db = get_db()
+    item = db.execute("SELECT * FROM items WHERE id = ?", (item_id,)).fetchone()
+    if not item:
+        return jsonify(error="Not found"), 404
+    qty, group, note, err = parse_use_body(db, request.get_json(force=True) or {})
+    if err:
+        return jsonify(error=err), 400
+
+    gid = group["id"] if group else None
+    row = db.execute("SELECT * FROM usage WHERE item_id = ? AND group_id IS ?",
+                     (item_id, gid)).fetchone()
+    if not row or qty > row["quantity"]:
+        have = row["quantity"] if row else 0
+        return jsonify(error=f"Only {have} in use in {group['name'] if group else 'No group'}"), 400
+    if qty == row["quantity"]:
+        db.execute("DELETE FROM usage WHERE id = ?", (row["id"],))
+    else:
+        db.execute("UPDATE usage SET quantity = quantity - ? WHERE id = ?", (qty, row["id"]))
+    log_movement(db, item_id, qty, usage_reason(group, note), item["quantity"], "return")
+    db.commit()
+    return jsonify(fetch_item(db, item_id))
+
+
+@app.get("/api/groups")
+def list_groups():
+    """All groups with the items in use in each. Ungrouped usage comes last with id null."""
+    db = get_db()
+    groups = [dict(r, items=[]) for r in db.execute(
+        "SELECT * FROM item_groups ORDER BY name COLLATE NOCASE")]
+    by_id = {g["id"]: g for g in groups}
+    ungrouped = {"id": None, "name": "No group", "notes": "", "items": []}
+
+    rows = db.execute(
+        "SELECT u.group_id, u.quantity, i.id AS item_id, i.name, i.sku, "
+        "(SELECT filename FROM item_images im WHERE im.item_id = i.id ORDER BY im.id LIMIT 1) AS image "
+        "FROM usage u JOIN items i ON i.id = u.item_id ORDER BY i.name COLLATE NOCASE"
+    )
+    for r in rows:
+        target = by_id.get(r["group_id"], ungrouped)
+        target["items"].append({
+            "item_id": r["item_id"], "name": r["name"], "sku": r["sku"],
+            "quantity": r["quantity"],
+            "image": f"/uploads/{r['image']}" if r["image"] else None,
+        })
+    if ungrouped["items"]:
+        groups.append(ungrouped)
+    for grp in groups:
+        grp["total"] = sum(i["quantity"] for i in grp["items"])
+    return jsonify(groups)
+
+
+def clean_group(data):
+    name = str(data.get("name", "")).strip()
+    if not name:
+        return None, "name is required"
+    return {"name": name, "notes": str(data.get("notes", "")).strip()}, None
+
+
+@app.post("/api/groups")
+def create_group():
+    data, err = clean_group(request.get_json(force=True) or {})
+    if err:
+        return jsonify(error=err), 400
+    db = get_db()
+    try:
+        cur = db.execute("INSERT INTO item_groups (name, notes, created_at) VALUES (?, ?, ?)",
+                         (data["name"], data["notes"], now()))
+    except sqlite3.IntegrityError:
+        return jsonify(error=f"Group '{data['name']}' already exists"), 409
+    db.commit()
+    return jsonify(dict(db.execute("SELECT * FROM item_groups WHERE id = ?",
+                                   (cur.lastrowid,)).fetchone())), 201
+
+
+@app.put("/api/groups/<int:group_id>")
+def update_group(group_id):
+    data, err = clean_group(request.get_json(force=True) or {})
+    if err:
+        return jsonify(error=err), 400
+    db = get_db()
+    try:
+        cur = db.execute("UPDATE item_groups SET name = ?, notes = ? WHERE id = ?",
+                         (data["name"], data["notes"], group_id))
+    except sqlite3.IntegrityError:
+        return jsonify(error=f"Group '{data['name']}' already exists"), 409
+    if cur.rowcount == 0:
+        return jsonify(error="Not found"), 404
+    db.commit()
+    return jsonify(dict(db.execute("SELECT * FROM item_groups WHERE id = ?",
+                                   (group_id,)).fetchone()))
+
+
+@app.delete("/api/groups/<int:group_id>")
+def delete_group(group_id):
+    """Everything in use in the group is returned to available."""
+    db = get_db()
+    group = db.execute("SELECT * FROM item_groups WHERE id = ?", (group_id,)).fetchone()
+    if not group:
+        return jsonify(error="Not found"), 404
+    for r in db.execute("SELECT u.item_id, u.quantity, i.quantity AS total FROM usage u "
+                        "JOIN items i ON i.id = u.item_id WHERE u.group_id = ?", (group_id,)).fetchall():
+        log_movement(db, r["item_id"], r["quantity"],
+                     usage_reason(group, "group deleted"), r["total"], "return")
+    db.execute("DELETE FROM item_groups WHERE id = ?", (group_id,))
+    db.commit()
+    return jsonify(ok=True)
+
+
+# ---------- tool checkout API ----------
+
+CHECKOUT_SELECT = (
+    "SELECT c.*, i.name AS item_name, i.sku, i.location, "
+    "(SELECT filename FROM item_images im WHERE im.item_id = i.id ORDER BY im.id LIMIT 1) AS image "
+    "FROM checkouts c JOIN items i ON i.id = c.item_id"
+)
+
+
+def checkout_json(row):
+    d = dict(row)
+    d["image"] = f"/uploads/{d['image']}" if d["image"] else None
+    return d
+
+
+@app.get("/api/checkouts")
+def list_checkouts():
+    """?status=open (default) | returned | all, optional item_id, limit."""
+    status = request.args.get("status", "open")
+    item_id = request.args.get("item_id", type=int)
+    limit = min(request.args.get("limit", 200, type=int), 1000)
+    sql, params = CHECKOUT_SELECT + " WHERE 1=1", []
+    if status == "open":
+        sql += " AND c.returned_at IS NULL"
+    elif status == "returned":
+        sql += " AND c.returned_at IS NOT NULL"
+    if item_id:
+        sql += " AND c.item_id = ?"
+        params.append(item_id)
+    if status == "returned":
+        sql += " ORDER BY c.returned_at DESC"
+    else:
+        sql += " ORDER BY c.returned_at IS NOT NULL, c.checked_out_at DESC"
+    sql += " LIMIT ?"
+    params.append(limit)
+    return jsonify([checkout_json(r) for r in get_db().execute(sql, params)])
+
+
+@app.post("/api/checkouts")
+def create_checkout():
+    """Body: {"item_id": 1, "person": "Sam", "quantity": 1, "due_at": "2026-11-20T17:00", "note": ""}"""
+    body = request.get_json(force=True) or {}
+    person = str(body.get("person", "")).strip()
+    if not person:
+        return jsonify(error="Who is checking it out?"), 400
+    try:
+        qty = int(body.get("quantity", 1))
+        item_id = int(body.get("item_id"))
+    except (TypeError, ValueError):
+        return jsonify(error="item_id and quantity must be numbers"), 400
+    if qty <= 0:
+        return jsonify(error="quantity must be at least 1"), 400
+    due_at = str(body.get("due_at") or "").strip() or None
+    if due_at:
+        try:
+            datetime.fromisoformat(due_at)
+        except ValueError:
+            return jsonify(error="due_at must be a date/time like 2026-11-20T17:00"), 400
+
+    db = get_db()
+    item = db.execute("SELECT * FROM item_view WHERE id = ?", (item_id,)).fetchone()
+    if not item:
+        return jsonify(error="Tool not found"), 404
+    if qty > item["available"]:
+        return jsonify(error=f"Only {item['available']} available"), 400
+    note = str(body.get("note", "")).strip()
+    cur = db.execute(
+        "INSERT INTO checkouts (item_id, person, quantity, note, due_at, checked_out_at) "
+        "VALUES (?, ?, ?, ?, ?, ?)",
+        (item_id, person, qty, note, due_at, now()),
+    )
+    log_movement(db, item_id, qty, f"{person} · {note}" if note else person,
+                 item["quantity"], "checkout")
+    db.commit()
+    return jsonify(checkout_json(db.execute(CHECKOUT_SELECT + " WHERE c.id = ?",
+                                            (cur.lastrowid,)).fetchone())), 201
+
+
+@app.post("/api/checkouts/<int:checkout_id>/return")
+def return_checkout(checkout_id):
+    """Body (optional): {"note": "Blade is dull"}"""
+    body = request.get_json(silent=True) or {}
+    db = get_db()
+    row = db.execute("SELECT c.*, i.quantity AS total FROM checkouts c "
+                     "JOIN items i ON i.id = c.item_id WHERE c.id = ?", (checkout_id,)).fetchone()
+    if not row:
+        return jsonify(error="Not found"), 404
+    if row["returned_at"]:
+        return jsonify(error="Already returned"), 400
+    note = str(body.get("note", "")).strip()
+    db.execute("UPDATE checkouts SET returned_at = ?, return_note = ? WHERE id = ?",
+               (now(), note, checkout_id))
+    log_movement(db, row["item_id"], row["quantity"],
+                 f"{row['person']} · {note}" if note else row["person"], row["total"], "checkin")
+    db.commit()
+    return jsonify(checkout_json(db.execute(CHECKOUT_SELECT + " WHERE c.id = ?",
+                                            (checkout_id,)).fetchone()))
+
+
+@app.get("/api/people")
+def list_people():
+    """Names used for past checkouts, for autocomplete."""
+    rows = get_db().execute(
+        "SELECT person FROM checkouts GROUP BY person COLLATE NOCASE "
+        "ORDER BY MAX(checked_out_at) DESC LIMIT 200")
+    return jsonify([r["person"] for r in rows])
 
 
 # ---------- images API ----------
@@ -522,9 +869,11 @@ def stats():
     s = db.execute(
         "SELECT COUNT(*) AS item_count, "
         "COALESCE(SUM(quantity), 0) AS total_units, "
+        "COALESCE(SUM(in_use), 0) AS in_use_units, "
+        "COALESCE(SUM(checked_out), 0) AS checked_out_units, "
         "COALESCE(SUM(quantity * unit_price), 0) AS total_value, "
-        "COALESCE(SUM(quantity <= reorder_level), 0) AS low_stock "
-        "FROM items"
+        "COALESCE(SUM(available <= reorder_level), 0) AS low_stock "
+        "FROM item_view"
     ).fetchone()
     return jsonify(dict(s))
 
@@ -533,14 +882,17 @@ def stats():
 def export_csv():
     db = get_db()
     items = with_extras(db, db.execute(
-        "SELECT * FROM items ORDER BY name COLLATE NOCASE").fetchall())
+        "SELECT * FROM item_view ORDER BY name COLLATE NOCASE").fetchall())
     buf = io.StringIO()
     w = csv.writer(buf)
-    w.writerow(["id", *ITEM_FIELDS, "links", "image_count", "created_at", "updated_at"])
+    w.writerow(["id", *ITEM_FIELDS, "in_use", "checked_out", "available", "in_use_by_group",
+                "links", "image_count", "created_at", "updated_at"])
     for i in items:
         links = " | ".join(f"{l['label']} {l['url']}".strip() for l in i["links"])
-        w.writerow([i["id"], *(i[f] for f in ITEM_FIELDS), links, len(i["images"]),
-                    i["created_at"], i["updated_at"]])
+        groups = " | ".join(f"{u['group_name'] or 'No group'}: {u['quantity']}" for u in i["usage"])
+        w.writerow([i["id"], *(i[f] for f in ITEM_FIELDS), i["in_use"], i["checked_out"],
+                    i["available"], groups,
+                    links, len(i["images"]), i["created_at"], i["updated_at"]])
     return Response(
         buf.getvalue(),
         mimetype="text/csv",

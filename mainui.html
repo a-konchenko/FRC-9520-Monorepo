@@ -97,6 +97,34 @@
   .error { color: var(--danger); min-height: 1.2em; margin-top: 8px; }
   .tabs { display: flex; gap: 4px; }
   .tabs button.active { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
+  .chips button { border-radius: 999px; padding: 4px 12px; font-size: 13px; display: inline-flex; align-items: center; gap: 6px; }
+  .chips button.active { background: var(--text); color: var(--bg); border-color: var(--text); }
+  .form-grid label.check { flex-direction: row; align-items: center; gap: 8px; font-size: 13px; color: var(--text); }
+  .panel { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 14px; }
+  .panel h3, .section-title { margin: 0 0 10px; font-size: 13px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
+  .toolbar .section-title { margin: 0 8px 0 0; }
+  .co-top { display: grid; grid-template-columns: minmax(280px, 2fr) 3fr; gap: 12px; align-items: start; }
+  .table-scroll { overflow-x: auto; }
+  .status { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 12px; font-weight: 600; }
+  .status.in { background: #16a34a22; color: var(--ok); }
+  .status.out { background: #dc262622; color: var(--danger); }
+  .status.part { background: var(--warn-bg); color: var(--warn-text); }
+  tr.overdue td { background: #dc26261a; }
+  .tag-out { font-size: 12px; color: var(--danger); margin-left: 4px; }
+  @media (max-width: 800px) { .co-top { grid-template-columns: 1fr; } }
+  .groups { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 12px; }
+  .group { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 14px;
+           display: flex; flex-direction: column; gap: 10px; }
+  .group-head { display: flex; align-items: flex-start; gap: 8px; }
+  .group-head h3 { margin: 0; font-size: 16px; flex: 1; }
+  .group-head .count { font-size: 12px; color: var(--muted); font-weight: 400; display: block; margin-top: 2px; }
+  .group-items { display: flex; flex-direction: column; gap: 6px; }
+  .gi { display: grid; grid-template-columns: 32px 1fr auto; gap: 8px; align-items: center; }
+  .gi .thumb { width: 32px; height: 32px; }
+  .gi .qty { font-weight: 600; font-variant-numeric: tabular-nums; }
+  .gi .ctl { display: flex; gap: 3px; align-items: center; }
+  .group-add { display: grid; grid-template-columns: 1fr 64px auto; gap: 6px; border-top: 1px solid var(--border); padding-top: 10px; }
   #lightbox { padding: 0; width: auto; max-width: 96vw; background: transparent; border: none; }
   #lightbox img { max-width: 96vw; max-height: 90vh; display: block; border-radius: 8px; }
   #toast { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%);
@@ -115,6 +143,8 @@
   <h1>📦 Inventory</h1>
   <div class="tabs">
     <button data-view="items" class="active">Items</button>
+    <button data-view="checkout">Tool checkout</button>
+    <button data-view="groups">Groups</button>
     <button data-view="categories">Categories</button>
     <button data-view="history">History</button>
   </div>
@@ -124,6 +154,8 @@
   <section class="stats">
     <div class="stat"><div class="label">Items</div><div class="value" id="s-items">–</div></div>
     <div class="stat"><div class="label">Total units</div><div class="value" id="s-units">–</div></div>
+    <div class="stat"><div class="label">In use</div><div class="value" id="s-inuse">–</div></div>
+    <div class="stat"><div class="label">Tools out</div><div class="value" id="s-out">–</div></div>
     <div class="stat"><div class="label">Stock value</div><div class="value" id="s-value">–</div></div>
     <div class="stat"><div class="label">Low stock</div><div class="value" id="s-low">–</div></div>
   </section>
@@ -137,11 +169,13 @@
       <a href="/api/export.csv"><button>Export CSV</button></a>
       <button class="primary" id="addBtn">+ Add item</button>
     </div>
+    <div class="chips" id="catChips"></div>
     <div class="table-wrap">
       <table>
         <thead><tr>
           <th></th><th>SKU</th><th>Name</th><th>Category</th><th>Location</th>
-          <th class="num">Qty</th><th class="num">Reorder at</th><th class="num">Unit price</th>
+          <th class="num">Total</th><th class="num">In use</th><th class="num">Available</th>
+          <th class="num">Reorder at</th><th class="num">Unit price</th>
           <th class="num">Value</th><th>Links</th><th></th>
         </tr></thead>
         <tbody id="rows"></tbody>
@@ -160,7 +194,7 @@
     <div class="table-wrap">
       <table>
         <thead><tr>
-          <th>Name</th><th>Description</th><th class="num">Default reorder</th>
+          <th>Name</th><th>Description</th><th>Checkout</th><th class="num">Default reorder</th>
           <th>Default location</th><th class="num">Items</th><th class="num">Units</th><th></th>
         </tr></thead>
         <tbody id="catRows"></tbody>
@@ -169,12 +203,78 @@
     </div>
   </section>
 
+  <!-- Tool checkout -->
+  <section id="view-checkout" hidden>
+    <div class="co-top">
+      <form id="coForm" class="panel">
+        <h3>Check out a tool</h3>
+        <div class="form-grid">
+          <label class="full">Tool *<select name="item_id" id="coTool" required></select></label>
+          <label>Person *<input name="person" list="peopleList" required placeholder="Who's taking it?"></label>
+          <label>Quantity<input name="quantity" type="number" min="1" value="1"></label>
+          <label>Due back<input name="due_at" type="datetime-local"></label>
+          <label>Note<input name="note" placeholder="e.g. for drivetrain"></label>
+        </div>
+        <div class="error" id="coError"></div>
+        <div class="dialog-actions" style="margin-top:4px">
+          <button type="submit" class="primary">Check out</button>
+        </div>
+      </form>
+      <div class="panel">
+        <h3>Checked out now <span class="muted" id="coSummary"></span></h3>
+        <div class="table-scroll">
+          <table>
+            <thead><tr><th>Tool</th><th>Person</th><th class="num">Qty</th><th>Since</th><th>Due</th><th></th></tr></thead>
+            <tbody id="coOpen"></tbody>
+          </table>
+          <div class="empty" id="coOpenEmpty" hidden>Nothing checked out. Every tool is in the room.</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="toolbar" style="margin-top:18px">
+      <h3 class="section-title">Tools</h3>
+      <input type="search" id="toolSearch" placeholder="Search tools…">
+      <span class="spacer"></span>
+      <span class="hint">Items in categories with “Allow checkout” on (set in Categories).</span>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th></th><th>Tool</th><th>SKU</th><th>Location</th><th class="num">Total</th>
+                   <th class="num">Out</th><th class="num">Available</th><th>Status</th><th></th></tr></thead>
+        <tbody id="toolRows"></tbody>
+      </table>
+      <div class="empty" id="toolEmpty" hidden>No tools yet. Add items to the Tools category to see them here.</div>
+    </div>
+
+    <h3 class="section-title" style="margin-top:18px">Recently returned</h3>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Tool</th><th>Person</th><th class="num">Qty</th><th>Out</th><th>Returned</th><th>Notes</th></tr></thead>
+        <tbody id="coReturned"></tbody>
+      </table>
+      <div class="empty" id="coReturnedEmpty" hidden>No returns yet.</div>
+    </div>
+    <datalist id="peopleList"></datalist>
+  </section>
+
+  <!-- Groups -->
+  <section id="view-groups" hidden>
+    <div class="toolbar">
+      <span class="muted">Items in use, grouped. Items still count towards the total while in use.</span>
+      <span class="spacer"></span>
+      <button class="primary" id="addGroupBtn">+ New group</button>
+    </div>
+    <div class="groups" id="groupCards"></div>
+    <div class="empty table-wrap" id="groupEmpty" hidden>No groups yet. Click “+ New group” to create one.</div>
+  </section>
+
   <!-- History -->
   <section id="view-history" hidden>
     <div class="table-wrap">
       <table>
-        <thead><tr><th>When</th><th>Item</th><th>SKU</th><th class="num">Change</th>
-                   <th class="num">Qty after</th><th>Reason</th></tr></thead>
+        <thead><tr><th>When</th><th>Item</th><th>SKU</th><th>Type</th><th class="num">Amount</th>
+                   <th class="num">Total after</th><th>Group / reason</th></tr></thead>
         <tbody id="historyRows"></tbody>
       </table>
       <div class="empty" id="historyEmpty" hidden>No stock movements yet.</div>
@@ -232,13 +332,15 @@
     <p class="muted" id="adjustCurrent"></p>
     <div class="form-grid">
       <label>Type
-        <select name="dir">
-          <option value="1">Stock in (+)</option>
-          <option value="-1">Stock out (−)</option>
+        <select name="action" id="adjustAction">
+          <option value="in">Stock in (+)</option>
+          <option value="use">Mark in use</option>
+          <option value="return">Return from use</option>
         </select>
       </label>
       <label>Amount<input name="amount" type="number" min="1" value="1" required></label>
-      <label class="full">Reason<input name="reason" placeholder="e.g. Received PO #123, Sold, Damaged"></label>
+      <label class="full" id="adjustGroupWrap" hidden>Group<select name="group" id="adjustGroup"></select></label>
+      <label class="full">Note<input name="reason" placeholder="e.g. Received PO #123"></label>
     </div>
     <div class="error" id="adjustError"></div>
     <div class="dialog-actions">
@@ -258,9 +360,27 @@
       <label class="full">Description<textarea name="description" rows="2"></textarea></label>
       <label>Default reorder level<input name="default_reorder_level" type="number" min="0" value="0"></label>
       <label>Default location<input name="default_location" placeholder="e.g. Aisle 2"></label>
+      <label class="full check"><input name="checkout" type="checkbox">
+        <span><strong>Allow checkout</strong> — items in this category appear on the Tool checkout page</span></label>
     </div>
     <p class="hint">New items in this category start with these defaults. Renaming a category also updates every item in it.</p>
     <div class="error" id="catError"></div>
+    <div class="dialog-actions">
+      <button type="button" data-close>Cancel</button>
+      <button type="submit" class="primary">Save</button>
+    </div>
+  </form>
+</dialog>
+
+<!-- Add / edit group -->
+<dialog id="groupDialog">
+  <form id="groupForm" method="dialog">
+    <h2 id="groupDialogTitle">New group</h2>
+    <div class="form-grid">
+      <label class="full">Name *<input name="name" required placeholder="e.g. Group 1, Stage left, Rig A"></label>
+      <label class="full">Notes<textarea name="notes" rows="2"></textarea></label>
+    </div>
+    <div class="error" id="groupError"></div>
     <div class="dialog-actions">
       <button type="button" data-close>Cancel</button>
       <button type="submit" class="primary">Save</button>
@@ -280,7 +400,10 @@ const host = (url) => { try { return new URL(url).hostname.replace(/^www\./, "")
 
 let items = [];
 let categories = [];
+let groups = [];
+let allItems = [];   // unfiltered, for the group "Add item" pickers
 let editingId = null;
+let editingGroupId = null;
 let adjustingId = null;
 let editingCatId = null;
 let pendingFiles = [];   // images chosen in the item dialog, uploaded on save
@@ -323,6 +446,8 @@ async function loadStats() {
   const s = await api("/api/stats");
   $("#s-items").textContent = s.item_count;
   $("#s-units").textContent = s.total_units.toLocaleString();
+  $("#s-inuse").textContent = s.in_use_units.toLocaleString();
+  $("#s-out").textContent = s.checked_out_units.toLocaleString();
   $("#s-value").textContent = money(s.total_value);
   $("#s-low").textContent = s.low_stock;
 }
@@ -333,11 +458,13 @@ async function loadCategories() {
   sel.innerHTML = '<option value="">All categories</option>' +
     categories.map((c) => `<option>${esc(c.name)}</option>`).join("");
   sel.value = current;
+  renderCatChips();
 
   $("#catEmpty").hidden = categories.length > 0;
   $("#catRows").innerHTML = categories.map((c) => `<tr>
     <td>${chip(c.name, c.color)}</td>
     <td class="wrap">${esc(c.description) || '<span class="muted">—</span>'}</td>
+    <td>${c.checkout ? "✓ Allowed" : '<span class="muted">—</span>'}</td>
     <td class="num">${c.default_reorder_level}</td>
     <td>${esc(c.default_location) || '<span class="muted">—</span>'}</td>
     <td class="num">${c.item_count}</td>
@@ -350,6 +477,25 @@ async function loadCategories() {
   </tr>`).join("");
 }
 
+// Quick category filter on the main screen. Checkout (tool) categories come first.
+function renderCatChips() {
+  const current = $("#category").value;
+  const ordered = [...categories].sort((a, b) => b.checkout - a.checkout);
+  $("#catChips").innerHTML =
+    `<button data-cat="" class="${current ? "" : "active"}">All items</button>` +
+    ordered.map((c) => `<button data-cat="${esc(c.name)}" class="${c.name === current ? "active" : ""}">
+      <span class="swatch" style="background:${c.color}"></span>${c.checkout ? "🔧 " : ""}${esc(c.name)}
+      <span class="muted">${c.item_count}</span></button>`).join("");
+}
+$("#catChips").addEventListener("click", (e) => {
+  const b = e.target.closest("button[data-cat]");
+  if (!b) return;
+  $("#category").value = b.dataset.cat;
+  renderCatChips();
+  loadItems();
+});
+$("#category").addEventListener("change", renderCatChips);
+
 async function loadItems() {
   const params = new URLSearchParams({
     q: $("#search").value,
@@ -359,7 +505,7 @@ async function loadItems() {
   items = await api("/api/items?" + params);
   $("#empty").hidden = items.length > 0;
   $("#rows").innerHTML = items.map((i) => {
-    const low = i.quantity <= i.reorder_level;
+    const low = i.available <= i.reorder_level;
     const img = i.images[0];
     const thumb = img
       ? `<img class="thumb" src="${esc(img.url)}" alt="" data-act="view" data-id="${i.id}" loading="lazy">`
@@ -375,13 +521,16 @@ async function loadItems() {
       <td><button class="link" data-act="view" data-id="${i.id}">${esc(i.name)}</button>${low ? '<span class="badge">low</span>' : ""}</td>
       <td>${chip(i.category, i.category_color)}</td>
       <td>${esc(i.location) || '<span class="muted">—</span>'}</td>
-      <td class="num"><strong>${i.quantity}</strong></td>
+      <td class="num">${i.quantity}</td>
+      <td class="num">${i.in_use || '<span class="muted">0</span>'}${i.checked_out ? `<span class="tag-out">+${i.checked_out} out</span>` : ""}</td>
+      <td class="num"><strong>${i.available}</strong></td>
       <td class="num">${i.reorder_level}</td>
       <td class="num">${money(i.unit_price)}</td>
       <td class="num">${money(i.quantity * i.unit_price)}</td>
       <td>${links}</td>
       <td><div class="actions">
-        <button class="sm" data-act="adjust" data-id="${i.id}">± Stock</button>
+        ${i.is_tool ? `<button class="sm" data-act="checkout" data-id="${i.id}">Check out</button>` : ""}
+        <button class="sm" data-act="adjust" data-id="${i.id}">Stock / Use</button>
         <button class="sm" data-act="edit" data-id="${i.id}">Edit</button>
         <button class="sm danger" data-act="delete" data-id="${i.id}">Delete</button>
       </div></td>
@@ -396,15 +545,66 @@ async function loadHistory() {
     <td>${esc(m.created_at.replace("T", " "))}</td>
     <td>${esc(m.item_name)}</td>
     <td>${esc(m.sku)}</td>
-    <td class="num ${m.change > 0 ? "pos" : "neg"}">${m.change > 0 ? "+" : ""}${m.change}</td>
+    ${movementCells(m)}
     <td class="num">${m.qty_after}</td>
     <td>${esc(m.reason) || '<span class="muted">—</span>'}</td>
   </tr>`).join("");
 }
 
+// Type + amount cells for a history row.
+function movementCells(m) {
+  if (m.kind === "in_use") return `<td>In use</td><td class="num">${m.change}</td>`;
+  if (m.kind === "return") return `<td>Returned</td><td class="num">${m.change}</td>`;
+  if (m.kind === "checkout") return `<td>Checked out</td><td class="num">${m.change}</td>`;
+  if (m.kind === "checkin") return `<td>Checked in</td><td class="num">${m.change}</td>`;
+  const cls = m.change > 0 ? "pos" : "neg";
+  return `<td>${m.change > 0 ? "Stock in" : "Removed"}</td>` +
+         `<td class="num ${cls}">${m.change > 0 ? "+" : ""}${m.change}</td>`;
+}
+
+async function loadGroups() {
+  [groups, allItems] = await Promise.all([api("/api/groups"), api("/api/items")]);
+  renderGroups();
+}
+
+function renderGroups() {
+  $("#groupEmpty").hidden = groups.length > 0;
+  $("#groupCards").innerHTML = groups.map((g) => {
+    const gid = g.id ?? "";
+    const rows = g.items.map((it) => `<div class="gi">
+        ${it.image ? `<img class="thumb" src="${esc(it.image)}" alt="">` : '<div class="thumb none">·</div>'}
+        <div><strong>${esc(it.name)}</strong> <span class="muted">${esc(it.sku)}</span></div>
+        <div class="ctl">
+          <button class="sm" data-gact="dec" data-gid="${gid}" data-item="${it.item_id}" title="Return 1">−</button>
+          <span class="qty">${it.quantity}×</span>
+          <button class="sm" data-gact="inc" data-gid="${gid}" data-item="${it.item_id}" title="1 more in use">+</button>
+          <button class="sm danger" data-gact="return" data-gid="${gid}" data-item="${it.item_id}" data-qty="${it.quantity}" title="Return all">Return</button>
+        </div>
+      </div>`).join("");
+    return `<div class="group">
+      <div class="group-head">
+        <h3>${esc(g.name)}<span class="count">${g.total} in use${g.items.length ? ` · ${g.items.length} item${g.items.length > 1 ? "s" : ""}` : ""}</span></h3>
+        ${g.id ? `<button class="sm" data-gact="edit" data-gid="${g.id}">Edit</button>
+                  <button class="sm danger" data-gact="delete" data-gid="${g.id}">Delete</button>` : ""}
+      </div>
+      ${g.notes ? `<div class="muted" style="white-space:pre-wrap">${esc(g.notes)}</div>` : ""}
+      <div class="group-items">${rows || '<span class="muted">Nothing in use yet.</span>'}</div>
+      <div class="group-add" data-gid="${gid}">
+        <select class="gadd-item">
+          <option value="">Add item…</option>
+          ${allItems.filter((i) => i.available > 0).map((i) =>
+            `<option value="${i.id}">${esc(i.name)} (${i.available} available)</option>`).join("")}
+        </select>
+        <input class="gadd-qty" type="number" min="1" value="1">
+        <button class="sm primary" data-gact="add" data-gid="${gid}">Add</button>
+      </div>
+    </div>`;
+  }).join("");
+}
+
 async function refresh() {
   try {
-    await Promise.all([loadStats(), loadCategories(), loadItems()]);
+    await Promise.all([loadStats(), loadCategories(), loadItems(), loadGroups(), loadCheckout()]);
     if (!$("#view-history").hidden) await loadHistory();
   } catch (e) { toast(e.message); }
 }
@@ -556,7 +756,12 @@ async function openDetail(item) {
     <dl class="kv">
       <dt>Category</dt><dd>${chip(item.category, item.category_color)}</dd>
       <dt>Location</dt><dd>${esc(item.location) || "—"}</dd>
-      <dt>Quantity</dt><dd><strong>${item.quantity}</strong> (reorder at ${item.reorder_level})</dd>
+      <dt>Quantity</dt><dd><strong>${item.available}</strong> available · ${item.in_use} in use · ${item.quantity} total (reorder at ${item.reorder_level})</dd>
+      ${item.usage.length ? `<dt>In use by</dt><dd>${item.usage.map((u) =>
+          `${esc(u.group_name || "No group")}: ${u.quantity}×`).join("<br>")}</dd>` : ""}
+      ${openCheckouts.some((c) => c.item_id === item.id) ? `<dt>Checked out to</dt><dd>${openCheckouts
+          .filter((c) => c.item_id === item.id)
+          .map((c) => `${esc(c.person)}: ${c.quantity}×${c.due_at ? ` (due ${fmtDate(c.due_at)})` : ""}`).join("<br>")}</dd>` : ""}
       <dt>Unit price</dt><dd>${money(item.unit_price)} · stock value ${money(item.quantity * item.unit_price)}</dd>
       ${item.notes ? `<dt>Notes</dt><dd style="white-space:pre-wrap">${esc(item.notes)}</dd>` : ""}
     </dl>
@@ -567,8 +772,8 @@ async function openDetail(item) {
     <h3>Recent stock changes</h3>
     ${hist.length ? `<table>${hist.map((m) => `<tr>
         <td>${esc(m.created_at.replace("T", " "))}</td>
-        <td class="num ${m.change > 0 ? "pos" : "neg"}">${m.change > 0 ? "+" : ""}${m.change}</td>
-        <td class="num">${m.qty_after}</td><td>${esc(m.reason)}</td></tr>`).join("")}</table>`
+        ${movementCells(m)}
+        <td>${esc(m.reason)}</td></tr>`).join("")}</table>`
       : '<p class="muted">None yet.</p>'}`;
   $("#detailBody").querySelectorAll("img[data-full]").forEach((im) =>
     im.addEventListener("click", () => openLightbox(im.dataset.full)));
@@ -577,28 +782,232 @@ async function openDetail(item) {
 }
 
 // ----- adjust dialog -----
+let adjustingItem = null;
+
 function openAdjustDialog(item) {
   adjustingId = item.id;
+  adjustingItem = item;
   $("#adjustForm").reset();
-  $("#adjustTitle").textContent = `Adjust stock — ${item.name}`;
-  $("#adjustCurrent").textContent = `Currently ${item.quantity} in stock`;
+  $("#adjustTitle").textContent = `Stock / Use — ${item.name}`;
+  $("#adjustCurrent").textContent =
+    `${item.quantity} total · ${item.in_use} in use · ${item.available} available`;
+  $("#adjustAction").querySelector('[value="return"]').disabled = item.in_use === 0;
+  updateAdjustGroups();
   $("#adjustError").textContent = "";
   $("#adjustDialog").showModal();
   $("#adjustForm").elements.amount.select();
 }
 
+// "Mark in use" can go to any group; "Return" only from groups holding this item.
+function updateAdjustGroups() {
+  const action = $("#adjustAction").value;
+  const sel = $("#adjustGroup");
+  $("#adjustGroupWrap").hidden = action === "in";
+  if (action === "use") {
+    sel.innerHTML = '<option value="">No group</option>' + groups.filter((g) => g.id)
+      .map((g) => `<option value="${g.id}">${esc(g.name)}</option>`).join("");
+    if (groups.some((g) => g.id)) sel.value = groups.find((g) => g.id).id;
+  } else if (action === "return") {
+    sel.innerHTML = adjustingItem.usage.map((u) =>
+      `<option value="${u.group_id ?? ""}">${esc(u.group_name || "No group")} (${u.quantity} in use)</option>`).join("");
+  }
+}
+$("#adjustAction").addEventListener("change", updateAdjustGroups);
+
 $("#adjustForm").addEventListener("submit", async (e) => {
   e.preventDefault();
   const f = e.target.elements;
-  const change = Number(f.dir.value) * Number(f.amount.value);
+  const amount = Number(f.amount.value);
+  const groupId = f.group.value === "" ? null : Number(f.group.value);
   try {
-    await api(`/api/items/${adjustingId}/adjust`, {
-      method: "POST", body: { change, reason: f.reason.value },
-    });
+    if (f.action.value === "in") {
+      await api(`/api/items/${adjustingId}/adjust`, {
+        method: "POST", body: { change: amount, reason: f.reason.value },
+      });
+      toast("Stock added");
+    } else {
+      await api(`/api/items/${adjustingId}/${f.action.value}`, {
+        method: "POST", body: { quantity: amount, group_id: groupId, note: f.reason.value },
+      });
+      toast(f.action.value === "use" ? "Marked in use" : "Returned");
+    }
     $("#adjustDialog").close();
-    toast(`Stock ${change > 0 ? "added" : "removed"}`);
     refresh();
   } catch (err) { $("#adjustError").textContent = err.message; }
+});
+
+// ----- tool checkout -----
+let tools = [];
+let openCheckouts = [];
+
+const fmtDate = (s) => s ? new Date(s).toLocaleString(undefined,
+  { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }) : "";
+const isOverdue = (c) => c.due_at && !c.returned_at && new Date(c.due_at) < new Date();
+
+async function loadCheckout() {
+  const [t, open, returned, people] = await Promise.all([
+    api("/api/items?tools=1"),
+    api("/api/checkouts?status=open"),
+    api("/api/checkouts?status=returned&limit=25"),
+    api("/api/people"),
+  ]);
+  tools = t;
+  openCheckouts = open;
+  $("#peopleList").innerHTML = people.map((p) => `<option value="${esc(p)}">`).join("");
+
+  // Tool picker keeps its selection across refreshes.
+  const sel = $("#coTool"), current = sel.value;
+  sel.innerHTML = '<option value="">Choose a tool…</option>' + tools.map((x) =>
+    `<option value="${x.id}" ${x.available ? "" : "disabled"}>${esc(x.name)} — ${x.available} available${x.location ? ` · ${esc(x.location)}` : ""}</option>`).join("");
+  sel.value = current;
+
+  const overdue = open.filter(isOverdue).length;
+  $("#coSummary").textContent = open.length ? `· ${open.length}${overdue ? ` · ${overdue} overdue` : ""}` : "";
+  $("#coOpenEmpty").hidden = open.length > 0;
+  $("#coOpen").innerHTML = open.map((c) => `<tr class="${isOverdue(c) ? "overdue" : ""}">
+    <td><strong>${esc(c.item_name)}</strong>${c.note ? `<div class="hint">${esc(c.note)}</div>` : ""}</td>
+    <td>${esc(c.person)}</td>
+    <td class="num">${c.quantity}</td>
+    <td>${fmtDate(c.checked_out_at)}</td>
+    <td>${c.due_at ? fmtDate(c.due_at) + (isOverdue(c) ? ' <span class="status out">overdue</span>' : "") : '<span class="muted">—</span>'}</td>
+    <td><button class="sm primary" data-co-return="${c.id}">Return</button></td>
+  </tr>`).join("");
+
+  renderTools();
+
+  $("#coReturnedEmpty").hidden = returned.length > 0;
+  $("#coReturned").innerHTML = returned.map((c) => `<tr>
+    <td>${esc(c.item_name)}</td>
+    <td>${esc(c.person)}</td>
+    <td class="num">${c.quantity}</td>
+    <td>${fmtDate(c.checked_out_at)}</td>
+    <td>${fmtDate(c.returned_at)}</td>
+    <td class="wrap">${[c.note, c.return_note].filter(Boolean).map(esc).join(" · ") || '<span class="muted">—</span>'}</td>
+  </tr>`).join("");
+}
+
+function renderTools() {
+  const q = $("#toolSearch").value.trim().toLowerCase();
+  const list = tools.filter((t) => !q || [t.name, t.sku, t.location].some((v) => (v || "").toLowerCase().includes(q)));
+  $("#toolEmpty").hidden = list.length > 0;
+  $("#toolRows").innerHTML = list.map((t) => {
+    const status = t.available === 0
+      ? '<span class="status out">All out</span>'
+      : t.checked_out ? '<span class="status part">Some out</span>' : '<span class="status in">In room</span>';
+    const img = t.images[0];
+    return `<tr>
+      <td>${img ? `<img class="thumb" src="${esc(img.url)}" alt="" data-full="${esc(img.url)}" loading="lazy">` : '<div class="thumb none">·</div>'}</td>
+      <td><strong>${esc(t.name)}</strong></td>
+      <td>${esc(t.sku)}</td>
+      <td>${esc(t.location) || '<span class="muted">—</span>'}</td>
+      <td class="num">${t.quantity}</td>
+      <td class="num">${t.checked_out || '<span class="muted">0</span>'}</td>
+      <td class="num"><strong>${t.available}</strong></td>
+      <td>${status}</td>
+      <td><button class="sm" data-co-pick="${t.id}" ${t.available ? "" : "disabled"}>Check out</button></td>
+    </tr>`;
+  }).join("");
+}
+$("#toolSearch").addEventListener("input", renderTools);
+
+function startCheckout(itemId) {
+  showView("checkout");
+  $("#coTool").value = itemId;
+  $("#coError").textContent = "";
+  $("#coForm").elements.person.focus();
+  window.scrollTo({ top: 0, behavior: "smooth" });
+}
+
+$("#toolRows").addEventListener("click", (e) => {
+  const pick = e.target.closest("[data-co-pick]");
+  if (pick) return startCheckout(Number(pick.dataset.coPick));
+  const img = e.target.closest("img[data-full]");
+  if (img) openLightbox(img.dataset.full);
+});
+
+$("#coForm").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const body = Object.fromEntries(new FormData(e.target));
+  try {
+    const c = await api("/api/checkouts", { method: "POST", body });
+    e.target.reset();
+    $("#coError").textContent = "";
+    toast(`${c.item_name} checked out to ${c.person}`);
+    refresh();
+  } catch (err) { $("#coError").textContent = err.message; }
+});
+
+$("#coOpen").addEventListener("click", async (e) => {
+  const btn = e.target.closest("[data-co-return]");
+  if (!btn) return;
+  const note = prompt("Returning. Any note? (optional, e.g. “blade is dull”)", "");
+  if (note === null) return;
+  try {
+    const c = await api(`/api/checkouts/${btn.dataset.coReturn}/return`, { method: "POST", body: { note } });
+    toast(`${c.item_name} returned`);
+    refresh();
+  } catch (err) { toast(err.message); }
+});
+
+// ----- groups -----
+function openGroupDialog(group) {
+  editingGroupId = group ? group.id : null;
+  $("#groupDialogTitle").textContent = group ? "Edit group" : "New group";
+  const f = $("#groupForm");
+  f.reset();
+  if (group) { f.elements.name.value = group.name; f.elements.notes.value = group.notes; }
+  $("#groupError").textContent = "";
+  $("#groupDialog").showModal();
+  f.elements.name.focus();
+}
+
+$("#groupForm").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const body = Object.fromEntries(new FormData(e.target));
+  try {
+    if (editingGroupId) await api(`/api/groups/${editingGroupId}`, { method: "PUT", body });
+    else await api("/api/groups", { method: "POST", body });
+    $("#groupDialog").close();
+    toast(editingGroupId ? "Group updated" : "Group created");
+    refresh();
+  } catch (err) { $("#groupError").textContent = err.message; }
+});
+
+$("#addGroupBtn").addEventListener("click", () => openGroupDialog(null));
+
+$("#groupCards").addEventListener("click", async (e) => {
+  const btn = e.target.closest("button[data-gact]");
+  if (!btn) return;
+  const act = btn.dataset.gact;
+  const groupId = btn.dataset.gid === "" ? null : Number(btn.dataset.gid);
+  const group = groups.find((g) => g.id === groupId);
+  const itemId = Number(btn.dataset.item);
+  const use = (path, quantity) =>
+    api(`/api/items/${itemId}/${path}`, { method: "POST", body: { quantity, group_id: groupId } });
+  try {
+    if (act === "edit") return openGroupDialog(group);
+    if (act === "delete") {
+      const msg = group.total
+        ? `Delete “${group.name}”? Its ${group.total} in-use item(s) will be returned to available.`
+        : `Delete “${group.name}”?`;
+      if (!confirm(msg)) return;
+      await api(`/api/groups/${groupId}`, { method: "DELETE" });
+      toast("Group deleted");
+    }
+    if (act === "inc") await use("use", 1);
+    if (act === "dec") await use("return", 1);
+    if (act === "return") { await use("return", Number(btn.dataset.qty)); toast("Returned"); }
+    if (act === "add") {
+      const row = btn.closest(".group-add");
+      const id = Number(row.querySelector(".gadd-item").value);
+      if (!id) return toast("Choose an item first");
+      await api(`/api/items/${id}/use`, {
+        method: "POST", body: { quantity: Number(row.querySelector(".gadd-qty").value), group_id: groupId },
+      });
+      toast("Added to group");
+    }
+    refresh();
+  } catch (err) { toast(err.message); }
 });
 
 // ----- category dialog -----
@@ -609,6 +1018,7 @@ function openCatDialog(cat) {
   f.reset();
   if (cat) for (const k of ["name", "color", "description", "default_reorder_level", "default_location"])
     f.elements[k].value = cat[k];
+  f.elements.checkout.checked = !!cat?.checkout;
   $("#catError").textContent = "";
   $("#catDialog").showModal();
   f.elements.name.focus();
@@ -617,6 +1027,7 @@ function openCatDialog(cat) {
 $("#catForm").addEventListener("submit", async (e) => {
   e.preventDefault();
   const body = Object.fromEntries(new FormData(e.target));
+  body.checkout = e.target.elements.checkout.checked;
   try {
     if (editingCatId) await api(`/api/categories/${editingCatId}`, { method: "PUT", body });
     else await api("/api/categories", { method: "POST", body });
@@ -661,6 +1072,7 @@ $("#rows").addEventListener("click", async (e) => {
   if (el.dataset.act === "view") openDetail(item);
   if (el.dataset.act === "edit") openItemDialog(item);
   if (el.dataset.act === "adjust") openAdjustDialog(item);
+  if (el.dataset.act === "checkout") startCheckout(item.id);
   if (el.dataset.act === "delete" && confirm(`Delete “${item.name}”? This also removes its images and history.`)) {
     try { await api(`/api/items/${item.id}`, { method: "DELETE" }); toast("Item deleted"); refresh(); }
     catch (err) { toast(err.message); }
@@ -674,14 +1086,17 @@ $("#lowOnly").addEventListener("change", loadItems);
 
 function showView(view) {
   document.querySelectorAll(".tabs button").forEach((x) => x.classList.toggle("active", x.dataset.view === view));
-  for (const v of ["items", "categories", "history"]) $(`#view-${v}`).hidden = v !== view;
+  for (const v of ["items", "checkout", "groups", "categories", "history"]) $(`#view-${v}`).hidden = v !== view;
   if (view === "history") loadHistory().catch((e) => toast(e.message));
 }
 document.querySelectorAll(".tabs button").forEach((b) => b.addEventListener("click", () => showView(b.dataset.view)));
 
 refresh();
 // Keep multiple users on the network roughly in sync.
-setInterval(() => { if (!document.querySelector("dialog[open]")) refresh(); }, 15000);
+setInterval(() => {
+  const busy = document.querySelector("dialog[open]") || document.activeElement?.closest(".group-add, #coForm");
+  if (!busy) refresh();
+}, 15000);
 </script>
 </body>
 </html>
