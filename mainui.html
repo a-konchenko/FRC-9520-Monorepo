@@ -1,0 +1,687 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Inventory</title>
+<style>
+  :root {
+    --bg: #f6f7f9; --panel: #fff; --text: #1d2330; --muted: #6b7280;
+    --border: #e3e6ea; --accent: #2563eb; --accent-text: #fff;
+    --danger: #dc2626; --ok: #16a34a; --warn-bg: #fef3c7; --warn-text: #92400e;
+    --thumb-bg: #eef0f3;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #12151b; --panel: #1b1f27; --text: #e6e8ec; --muted: #9aa3b2;
+      --border: #2c323d; --accent: #3b82f6; --warn-bg: #3a2e10; --warn-text: #fcd34d;
+      --thumb-bg: #252a34;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 14px/1.45 system-ui, -apple-system, Segoe UI, sans-serif;
+         background: var(--bg); color: var(--text); }
+  header { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap;
+           padding: 14px 20px; background: var(--panel); border-bottom: 1px solid var(--border); }
+  header h1 { font-size: 18px; margin: 0; }
+  main { max-width: 1250px; margin: 0 auto; padding: 20px 16px; }
+  a { color: var(--accent); }
+  .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+           gap: 12px; margin-bottom: 18px; }
+  .stat { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 14px; }
+  .stat .label { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .04em; }
+  .stat .value { font-size: 24px; font-weight: 600; margin-top: 4px; font-variant-numeric: tabular-nums; }
+  .toolbar { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; align-items: center; }
+  .toolbar input[type=search] { flex: 1 1 220px; }
+  .spacer { flex: 1; }
+  input, select, textarea, button { font: inherit; color: inherit; }
+  input, select, textarea { background: var(--panel); border: 1px solid var(--border);
+                            border-radius: 7px; padding: 7px 10px; min-width: 0; }
+  input[type=color] { padding: 2px; height: 36px; width: 100%; }
+  button { border: 1px solid var(--border); background: var(--panel); border-radius: 7px;
+           padding: 7px 12px; cursor: pointer; }
+  button:hover { filter: brightness(0.96); }
+  button.primary { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
+  button.danger { color: var(--danger); }
+  button.sm { padding: 3px 8px; font-size: 13px; }
+  button.link { border: none; background: none; padding: 0; color: var(--text); font-weight: 600; text-align: left; }
+  button.link:hover { text-decoration: underline; }
+  .table-wrap { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; }
+  th, td { text-align: left; padding: 8px 12px; border-bottom: 1px solid var(--border); white-space: nowrap; vertical-align: middle; }
+  th { font-size: 12px; color: var(--muted); font-weight: 600; text-transform: uppercase; letter-spacing: .04em; }
+  tr:last-child td { border-bottom: none; }
+  td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+  td.wrap { white-space: normal; min-width: 180px; }
+  tr.low td { background: var(--warn-bg); }
+  .badge { display: inline-block; padding: 1px 7px; border-radius: 999px; font-size: 12px;
+           background: var(--warn-text); color: var(--panel); margin-left: 6px; }
+  .chip { display: inline-flex; align-items: center; gap: 6px; padding: 2px 9px; border-radius: 999px;
+          font-size: 12px; border: 1px solid; }
+  .swatch { width: 10px; height: 10px; border-radius: 50%; display: inline-block; flex: none; }
+  .thumb { width: 40px; height: 40px; border-radius: 6px; object-fit: cover; display: block;
+           background: var(--thumb-bg); cursor: pointer; }
+  .thumb.none { display: grid; place-items: center; color: var(--muted); font-size: 18px; cursor: default; }
+  .muted { color: var(--muted); }
+  .empty { padding: 40px; text-align: center; color: var(--muted); }
+  .actions { display: flex; gap: 4px; justify-content: flex-end; }
+  .pos { color: var(--ok); } .neg { color: var(--danger); }
+  dialog { border: 1px solid var(--border); border-radius: 12px; background: var(--panel);
+           color: var(--text); padding: 20px; width: min(600px, 94vw); max-height: 92vh; }
+  dialog.wide { width: min(760px, 96vw); }
+  dialog::backdrop { background: rgba(0,0,0,.45); }
+  dialog h2 { margin: 0 0 14px; font-size: 17px; }
+  dialog h3 { margin: 18px 0 8px; font-size: 13px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
+  .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .form-grid label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--muted); }
+  .form-grid .full { grid-column: 1 / -1; }
+  .hint { font-size: 12px; color: var(--muted); }
+  .link-row { display: grid; grid-template-columns: 1fr 2fr auto; gap: 6px; margin-bottom: 6px; }
+  .gallery { display: flex; flex-wrap: wrap; gap: 8px; }
+  .gallery .img { position: relative; }
+  .gallery img { width: 88px; height: 88px; object-fit: cover; border-radius: 8px; display: block;
+                 background: var(--thumb-bg); border: 1px solid var(--border); cursor: pointer; }
+  .gallery .pending img { opacity: .7; border-style: dashed; }
+  .gallery .x { position: absolute; top: -6px; right: -6px; width: 22px; height: 22px; padding: 0;
+                border-radius: 50%; font-size: 13px; line-height: 1; background: var(--panel); color: var(--danger); }
+  .drop { border: 1.5px dashed var(--border); border-radius: 8px; padding: 12px; text-align: center;
+          color: var(--muted); cursor: pointer; margin-top: 8px; }
+  .drop.over { border-color: var(--accent); color: var(--accent); }
+  .detail-hero { width: 100%; max-height: 340px; object-fit: contain; border-radius: 10px;
+                 background: var(--thumb-bg); display: block; margin-bottom: 8px; }
+  .kv { display: grid; grid-template-columns: max-content 1fr; gap: 6px 16px; }
+  .kv dt { color: var(--muted); } .kv dd { margin: 0; }
+  .links-list { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 6px; }
+  .links-list a { word-break: break-all; }
+  .dialog-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
+  .error { color: var(--danger); min-height: 1.2em; margin-top: 8px; }
+  .tabs { display: flex; gap: 4px; }
+  .tabs button.active { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
+  #lightbox { padding: 0; width: auto; max-width: 96vw; background: transparent; border: none; }
+  #lightbox img { max-width: 96vw; max-height: 90vh; display: block; border-radius: 8px; }
+  #toast { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%);
+           background: var(--text); color: var(--bg); padding: 9px 16px; border-radius: 8px;
+           opacity: 0; transition: opacity .2s; pointer-events: none; z-index: 10; }
+  #toast.show { opacity: 1; }
+  @media (max-width: 600px) {
+    .form-grid { grid-template-columns: 1fr; }
+    .link-row { grid-template-columns: 1fr auto; }
+    .link-row .lbl { grid-column: 1 / -1; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>📦 Inventory</h1>
+  <div class="tabs">
+    <button data-view="items" class="active">Items</button>
+    <button data-view="categories">Categories</button>
+    <button data-view="history">History</button>
+  </div>
+</header>
+
+<main>
+  <section class="stats">
+    <div class="stat"><div class="label">Items</div><div class="value" id="s-items">–</div></div>
+    <div class="stat"><div class="label">Total units</div><div class="value" id="s-units">–</div></div>
+    <div class="stat"><div class="label">Stock value</div><div class="value" id="s-value">–</div></div>
+    <div class="stat"><div class="label">Low stock</div><div class="value" id="s-low">–</div></div>
+  </section>
+
+  <!-- Items -->
+  <section id="view-items">
+    <div class="toolbar">
+      <input type="search" id="search" placeholder="Search name, SKU, location…">
+      <select id="category"><option value="">All categories</option></select>
+      <label><input type="checkbox" id="lowOnly"> Low stock only</label>
+      <a href="/api/export.csv"><button>Export CSV</button></a>
+      <button class="primary" id="addBtn">+ Add item</button>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr>
+          <th></th><th>SKU</th><th>Name</th><th>Category</th><th>Location</th>
+          <th class="num">Qty</th><th class="num">Reorder at</th><th class="num">Unit price</th>
+          <th class="num">Value</th><th>Links</th><th></th>
+        </tr></thead>
+        <tbody id="rows"></tbody>
+      </table>
+      <div class="empty" id="empty" hidden>No items found. Click “+ Add item” to get started.</div>
+    </div>
+  </section>
+
+  <!-- Categories -->
+  <section id="view-categories" hidden>
+    <div class="toolbar">
+      <span class="muted">Categories set the colour label and the defaults used when adding new items.</span>
+      <span class="spacer"></span>
+      <button class="primary" id="addCatBtn">+ Add category</button>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr>
+          <th>Name</th><th>Description</th><th class="num">Default reorder</th>
+          <th>Default location</th><th class="num">Items</th><th class="num">Units</th><th></th>
+        </tr></thead>
+        <tbody id="catRows"></tbody>
+      </table>
+      <div class="empty" id="catEmpty" hidden>No categories yet.</div>
+    </div>
+  </section>
+
+  <!-- History -->
+  <section id="view-history" hidden>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>When</th><th>Item</th><th>SKU</th><th class="num">Change</th>
+                   <th class="num">Qty after</th><th>Reason</th></tr></thead>
+        <tbody id="historyRows"></tbody>
+      </table>
+      <div class="empty" id="historyEmpty" hidden>No stock movements yet.</div>
+    </div>
+  </section>
+</main>
+
+<!-- Add / edit item -->
+<dialog id="itemDialog" class="wide">
+  <form id="itemForm" method="dialog">
+    <h2 id="itemDialogTitle">Add item</h2>
+    <div class="form-grid">
+      <label>SKU *<input name="sku" required></label>
+      <label>Name *<input name="name" required></label>
+      <label>Category<select name="category" id="itemCategory"></select></label>
+      <label>Location<input name="location" placeholder="e.g. Shelf A3"></label>
+      <label>Quantity<input name="quantity" type="number" min="0" value="0"></label>
+      <label>Reorder level<input name="reorder_level" type="number" min="0" value="0"></label>
+      <label>Unit price<input name="unit_price" type="number" min="0" step="0.01" value="0"></label>
+      <label class="full">Notes<textarea name="notes" rows="2"></textarea></label>
+    </div>
+
+    <h3>Website links</h3>
+    <div id="linkRows"></div>
+    <button type="button" class="sm" id="addLinkBtn">+ Add link</button>
+
+    <h3>Images</h3>
+    <div class="gallery" id="imageGallery"></div>
+    <label class="drop" id="dropZone">
+      Click to choose images, or drag them here
+      <input type="file" id="imageInput" accept="image/*" multiple hidden>
+    </label>
+
+    <div class="error" id="itemError"></div>
+    <div class="dialog-actions">
+      <button type="button" data-close>Cancel</button>
+      <button type="submit" class="primary" id="itemSaveBtn">Save</button>
+    </div>
+  </form>
+</dialog>
+
+<!-- Item detail -->
+<dialog id="detailDialog" class="wide">
+  <div id="detailBody"></div>
+  <div class="dialog-actions">
+    <button type="button" id="detailEdit">Edit</button>
+    <button type="button" class="primary" data-close>Close</button>
+  </div>
+</dialog>
+
+<!-- Stock adjust -->
+<dialog id="adjustDialog">
+  <form id="adjustForm" method="dialog">
+    <h2 id="adjustTitle">Adjust stock</h2>
+    <p class="muted" id="adjustCurrent"></p>
+    <div class="form-grid">
+      <label>Type
+        <select name="dir">
+          <option value="1">Stock in (+)</option>
+          <option value="-1">Stock out (−)</option>
+        </select>
+      </label>
+      <label>Amount<input name="amount" type="number" min="1" value="1" required></label>
+      <label class="full">Reason<input name="reason" placeholder="e.g. Received PO #123, Sold, Damaged"></label>
+    </div>
+    <div class="error" id="adjustError"></div>
+    <div class="dialog-actions">
+      <button type="button" data-close>Cancel</button>
+      <button type="submit" class="primary">Apply</button>
+    </div>
+  </form>
+</dialog>
+
+<!-- Add / edit category -->
+<dialog id="catDialog">
+  <form id="catForm" method="dialog">
+    <h2 id="catDialogTitle">Add category</h2>
+    <div class="form-grid">
+      <label>Name *<input name="name" required></label>
+      <label>Colour<input name="color" type="color" value="#64748b"></label>
+      <label class="full">Description<textarea name="description" rows="2"></textarea></label>
+      <label>Default reorder level<input name="default_reorder_level" type="number" min="0" value="0"></label>
+      <label>Default location<input name="default_location" placeholder="e.g. Aisle 2"></label>
+    </div>
+    <p class="hint">New items in this category start with these defaults. Renaming a category also updates every item in it.</p>
+    <div class="error" id="catError"></div>
+    <div class="dialog-actions">
+      <button type="button" data-close>Cancel</button>
+      <button type="submit" class="primary">Save</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="lightbox"><img alt=""></dialog>
+<div id="toast"></div>
+
+<script>
+const $ = (s) => document.querySelector(s);
+const money = (n) => Number(n).toLocaleString(undefined, { style: "currency", currency: "USD" });
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) =>
+  ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const host = (url) => { try { return new URL(url).hostname.replace(/^www\./, ""); } catch { return url; } };
+
+let items = [];
+let categories = [];
+let editingId = null;
+let adjustingId = null;
+let editingCatId = null;
+let pendingFiles = [];   // images chosen in the item dialog, uploaded on save
+
+async function api(path, opts = {}) {
+  const isForm = opts.body instanceof FormData;
+  const res = await fetch(path, {
+    ...opts,
+    headers: isForm ? {} : { "Content-Type": "application/json" },
+    body: opts.body && !isForm ? JSON.stringify(opts.body) : opts.body,
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || `Request failed (${res.status})`);
+  return data;
+}
+
+function toast(msg) {
+  const t = $("#toast");
+  t.textContent = msg;
+  t.classList.add("show");
+  clearTimeout(t._h);
+  t._h = setTimeout(() => t.classList.remove("show"), 2200);
+}
+
+function chip(name, color) {
+  if (!name) return '<span class="muted">—</span>';
+  const c = color || "#64748b";
+  return `<span class="chip" style="border-color:${c};background:${c}1f">` +
+         `<span class="swatch" style="background:${c}"></span>${esc(name)}</span>`;
+}
+
+function openLightbox(src) {
+  $("#lightbox img").src = src;
+  $("#lightbox").showModal();
+}
+$("#lightbox").addEventListener("click", () => $("#lightbox").close());
+
+// ----- loading -----
+async function loadStats() {
+  const s = await api("/api/stats");
+  $("#s-items").textContent = s.item_count;
+  $("#s-units").textContent = s.total_units.toLocaleString();
+  $("#s-value").textContent = money(s.total_value);
+  $("#s-low").textContent = s.low_stock;
+}
+
+async function loadCategories() {
+  categories = await api("/api/categories");
+  const sel = $("#category"), current = sel.value;
+  sel.innerHTML = '<option value="">All categories</option>' +
+    categories.map((c) => `<option>${esc(c.name)}</option>`).join("");
+  sel.value = current;
+
+  $("#catEmpty").hidden = categories.length > 0;
+  $("#catRows").innerHTML = categories.map((c) => `<tr>
+    <td>${chip(c.name, c.color)}</td>
+    <td class="wrap">${esc(c.description) || '<span class="muted">—</span>'}</td>
+    <td class="num">${c.default_reorder_level}</td>
+    <td>${esc(c.default_location) || '<span class="muted">—</span>'}</td>
+    <td class="num">${c.item_count}</td>
+    <td class="num">${c.total_units}</td>
+    <td><div class="actions">
+      <button class="sm" data-act="filter" data-id="${c.id}">View items</button>
+      <button class="sm" data-act="edit" data-id="${c.id}">Edit</button>
+      <button class="sm danger" data-act="delete" data-id="${c.id}">Delete</button>
+    </div></td>
+  </tr>`).join("");
+}
+
+async function loadItems() {
+  const params = new URLSearchParams({
+    q: $("#search").value,
+    category: $("#category").value,
+    low: $("#lowOnly").checked ? "1" : "",
+  });
+  items = await api("/api/items?" + params);
+  $("#empty").hidden = items.length > 0;
+  $("#rows").innerHTML = items.map((i) => {
+    const low = i.quantity <= i.reorder_level;
+    const img = i.images[0];
+    const thumb = img
+      ? `<img class="thumb" src="${esc(img.url)}" alt="" data-act="view" data-id="${i.id}" loading="lazy">`
+      : `<div class="thumb none">·</div>`;
+    const links = i.links.length
+      ? i.links.slice(0, 2).map((l) =>
+          `<a href="${esc(l.url)}" target="_blank" rel="noopener">${esc(l.label || host(l.url))}</a>`).join(", ") +
+        (i.links.length > 2 ? ` <span class="muted">+${i.links.length - 2}</span>` : "")
+      : '<span class="muted">—</span>';
+    return `<tr class="${low ? "low" : ""}">
+      <td>${thumb}</td>
+      <td>${esc(i.sku)}</td>
+      <td><button class="link" data-act="view" data-id="${i.id}">${esc(i.name)}</button>${low ? '<span class="badge">low</span>' : ""}</td>
+      <td>${chip(i.category, i.category_color)}</td>
+      <td>${esc(i.location) || '<span class="muted">—</span>'}</td>
+      <td class="num"><strong>${i.quantity}</strong></td>
+      <td class="num">${i.reorder_level}</td>
+      <td class="num">${money(i.unit_price)}</td>
+      <td class="num">${money(i.quantity * i.unit_price)}</td>
+      <td>${links}</td>
+      <td><div class="actions">
+        <button class="sm" data-act="adjust" data-id="${i.id}">± Stock</button>
+        <button class="sm" data-act="edit" data-id="${i.id}">Edit</button>
+        <button class="sm danger" data-act="delete" data-id="${i.id}">Delete</button>
+      </div></td>
+    </tr>`;
+  }).join("");
+}
+
+async function loadHistory() {
+  const rows = await api("/api/movements?limit=300");
+  $("#historyEmpty").hidden = rows.length > 0;
+  $("#historyRows").innerHTML = rows.map((m) => `<tr>
+    <td>${esc(m.created_at.replace("T", " "))}</td>
+    <td>${esc(m.item_name)}</td>
+    <td>${esc(m.sku)}</td>
+    <td class="num ${m.change > 0 ? "pos" : "neg"}">${m.change > 0 ? "+" : ""}${m.change}</td>
+    <td class="num">${m.qty_after}</td>
+    <td>${esc(m.reason) || '<span class="muted">—</span>'}</td>
+  </tr>`).join("");
+}
+
+async function refresh() {
+  try {
+    await Promise.all([loadStats(), loadCategories(), loadItems()]);
+    if (!$("#view-history").hidden) await loadHistory();
+  } catch (e) { toast(e.message); }
+}
+
+// ----- item dialog: links -----
+function addLinkRow(link = { label: "", url: "" }) {
+  const row = document.createElement("div");
+  row.className = "link-row";
+  row.innerHTML = `
+    <input class="lbl" placeholder="Label (e.g. Supplier, Manual)" value="${esc(link.label)}">
+    <input class="url" type="text" inputmode="url" placeholder="https://…" value="${esc(link.url)}">
+    <button type="button" class="sm danger" title="Remove link">✕</button>`;
+  row.querySelector("button").addEventListener("click", () => row.remove());
+  $("#linkRows").appendChild(row);
+  return row;
+}
+$("#addLinkBtn").addEventListener("click", () => addLinkRow().querySelector(".url").focus());
+
+function readLinks() {
+  return [...document.querySelectorAll("#linkRows .link-row")]
+    .map((r) => ({ label: r.querySelector(".lbl").value.trim(), url: r.querySelector(".url").value.trim() }))
+    .filter((l) => l.url);
+}
+
+// ----- item dialog: images -----
+function renderGallery(existing) {
+  const g = $("#imageGallery");
+  g.innerHTML = "";
+  for (const img of existing) {
+    const d = document.createElement("div");
+    d.className = "img";
+    d.innerHTML = `<img src="${esc(img.url)}" alt=""><button type="button" class="x" title="Delete image">✕</button>`;
+    d.querySelector("img").addEventListener("click", () => openLightbox(img.url));
+    d.querySelector(".x").addEventListener("click", async () => {
+      if (!confirm("Delete this image?")) return;
+      try {
+        await api(`/api/images/${img.id}`, { method: "DELETE" });
+        existing.splice(existing.indexOf(img), 1);
+        renderGallery(existing);
+        loadItems();
+      } catch (e) { toast(e.message); }
+    });
+    g.appendChild(d);
+  }
+  pendingFiles.forEach((file, idx) => {
+    const d = document.createElement("div");
+    d.className = "img pending";
+    const url = URL.createObjectURL(file);
+    d.innerHTML = `<img src="${url}" alt="" title="Uploads when you save"><button type="button" class="x" title="Remove">✕</button>`;
+    d.querySelector(".x").addEventListener("click", () => {
+      pendingFiles.splice(idx, 1);
+      renderGallery(existing);
+    });
+    g.appendChild(d);
+  });
+}
+
+let galleryExisting = [];
+function addPendingFiles(fileList) {
+  const imgs = [...fileList].filter((f) => f.type.startsWith("image/") || /\.(heic|avif)$/i.test(f.name));
+  if (imgs.length < fileList.length) toast("Some files were skipped (not images)");
+  pendingFiles.push(...imgs);
+  renderGallery(galleryExisting);
+}
+$("#imageInput").addEventListener("change", (e) => { addPendingFiles(e.target.files); e.target.value = ""; });
+const drop = $("#dropZone");
+drop.addEventListener("dragover", (e) => { e.preventDefault(); drop.classList.add("over"); });
+drop.addEventListener("dragleave", () => drop.classList.remove("over"));
+drop.addEventListener("drop", (e) => { e.preventDefault(); drop.classList.remove("over"); addPendingFiles(e.dataTransfer.files); });
+
+// ----- item dialog: open / save -----
+function fillCategorySelect(selected) {
+  const sel = $("#itemCategory");
+  const names = categories.map((c) => c.name);
+  if (selected && !names.some((n) => n.toLowerCase() === selected.toLowerCase())) names.push(selected);
+  sel.innerHTML = '<option value="">— None —</option>' +
+    names.map((n) => `<option>${esc(n)}</option>`).join("");
+  sel.value = names.find((n) => n.toLowerCase() === (selected || "").toLowerCase()) || "";
+}
+
+// When adding a new item, picking a category fills in its defaults.
+$("#itemCategory").addEventListener("change", (e) => {
+  if (editingId) return;
+  const c = categories.find((x) => x.name === e.target.value);
+  if (!c) return;
+  const f = $("#itemForm").elements;
+  if (c.default_location && !f.location.value) f.location.value = c.default_location;
+  if (c.default_reorder_level && Number(f.reorder_level.value) === 0) f.reorder_level.value = c.default_reorder_level;
+});
+
+function openItemDialog(item) {
+  editingId = item ? item.id : null;
+  pendingFiles = [];
+  $("#itemDialogTitle").textContent = item ? "Edit item" : "Add item";
+  const f = $("#itemForm");
+  f.reset();
+  fillCategorySelect(item?.category);
+  if (item) for (const k of ["sku", "name", "location", "quantity", "reorder_level", "unit_price", "notes"])
+    f.elements[k].value = item[k];
+  $("#linkRows").innerHTML = "";
+  (item?.links || []).forEach((l) => addLinkRow(l));
+  galleryExisting = item ? [...item.images] : [];
+  renderGallery(galleryExisting);
+  $("#itemError").textContent = "";
+  $("#itemSaveBtn").disabled = false;
+  $("#itemDialog").showModal();
+  f.elements.sku.focus();
+}
+
+$("#itemForm").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const body = Object.fromEntries(new FormData(e.target));
+  body.links = readLinks();
+  const btn = $("#itemSaveBtn");
+  btn.disabled = true;
+  try {
+    const saved = editingId
+      ? await api(`/api/items/${editingId}`, { method: "PUT", body })
+      : await api("/api/items", { method: "POST", body });
+    editingId = saved.id;  // if image upload fails, a retry edits rather than duplicates
+    if (pendingFiles.length) {
+      btn.textContent = "Uploading…";
+      const fd = new FormData();
+      pendingFiles.forEach((f) => fd.append("images", f));
+      await api(`/api/items/${saved.id}/images`, { method: "POST", body: fd });
+      pendingFiles = [];
+    }
+    $("#itemDialog").close();
+    toast($("#itemDialogTitle").textContent === "Edit item" ? "Item updated" : "Item added");
+    refresh();
+  } catch (err) {
+    $("#itemError").textContent = err.message;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "Save";
+  }
+});
+
+// ----- item detail -----
+async function openDetail(item) {
+  const hist = await api(`/api/movements?item_id=${item.id}&limit=10`).catch(() => []);
+  const [first, ...rest] = item.images;
+  $("#detailBody").innerHTML = `
+    <h2>${esc(item.name)} <span class="muted" style="font-weight:400">· ${esc(item.sku)}</span></h2>
+    ${first ? `<img class="detail-hero" src="${esc(first.url)}" alt="" data-full="${esc(first.url)}">` : ""}
+    ${rest.length ? `<div class="gallery">${rest.map((im) =>
+        `<div class="img"><img src="${esc(im.url)}" alt="" data-full="${esc(im.url)}"></div>`).join("")}</div>` : ""}
+    <h3>Details</h3>
+    <dl class="kv">
+      <dt>Category</dt><dd>${chip(item.category, item.category_color)}</dd>
+      <dt>Location</dt><dd>${esc(item.location) || "—"}</dd>
+      <dt>Quantity</dt><dd><strong>${item.quantity}</strong> (reorder at ${item.reorder_level})</dd>
+      <dt>Unit price</dt><dd>${money(item.unit_price)} · stock value ${money(item.quantity * item.unit_price)}</dd>
+      ${item.notes ? `<dt>Notes</dt><dd style="white-space:pre-wrap">${esc(item.notes)}</dd>` : ""}
+    </dl>
+    <h3>Links</h3>
+    ${item.links.length ? `<ul class="links-list">${item.links.map((l) =>
+        `<li>${l.label ? `<strong>${esc(l.label)}:</strong> ` : ""}<a href="${esc(l.url)}" target="_blank" rel="noopener">${esc(l.url)}</a></li>`).join("")}</ul>`
+      : '<p class="muted">No links.</p>'}
+    <h3>Recent stock changes</h3>
+    ${hist.length ? `<table>${hist.map((m) => `<tr>
+        <td>${esc(m.created_at.replace("T", " "))}</td>
+        <td class="num ${m.change > 0 ? "pos" : "neg"}">${m.change > 0 ? "+" : ""}${m.change}</td>
+        <td class="num">${m.qty_after}</td><td>${esc(m.reason)}</td></tr>`).join("")}</table>`
+      : '<p class="muted">None yet.</p>'}`;
+  $("#detailBody").querySelectorAll("img[data-full]").forEach((im) =>
+    im.addEventListener("click", () => openLightbox(im.dataset.full)));
+  $("#detailEdit").onclick = () => { $("#detailDialog").close(); openItemDialog(item); };
+  $("#detailDialog").showModal();
+}
+
+// ----- adjust dialog -----
+function openAdjustDialog(item) {
+  adjustingId = item.id;
+  $("#adjustForm").reset();
+  $("#adjustTitle").textContent = `Adjust stock — ${item.name}`;
+  $("#adjustCurrent").textContent = `Currently ${item.quantity} in stock`;
+  $("#adjustError").textContent = "";
+  $("#adjustDialog").showModal();
+  $("#adjustForm").elements.amount.select();
+}
+
+$("#adjustForm").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const f = e.target.elements;
+  const change = Number(f.dir.value) * Number(f.amount.value);
+  try {
+    await api(`/api/items/${adjustingId}/adjust`, {
+      method: "POST", body: { change, reason: f.reason.value },
+    });
+    $("#adjustDialog").close();
+    toast(`Stock ${change > 0 ? "added" : "removed"}`);
+    refresh();
+  } catch (err) { $("#adjustError").textContent = err.message; }
+});
+
+// ----- category dialog -----
+function openCatDialog(cat) {
+  editingCatId = cat ? cat.id : null;
+  $("#catDialogTitle").textContent = cat ? "Edit category" : "Add category";
+  const f = $("#catForm");
+  f.reset();
+  if (cat) for (const k of ["name", "color", "description", "default_reorder_level", "default_location"])
+    f.elements[k].value = cat[k];
+  $("#catError").textContent = "";
+  $("#catDialog").showModal();
+  f.elements.name.focus();
+}
+
+$("#catForm").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const body = Object.fromEntries(new FormData(e.target));
+  try {
+    if (editingCatId) await api(`/api/categories/${editingCatId}`, { method: "PUT", body });
+    else await api("/api/categories", { method: "POST", body });
+    $("#catDialog").close();
+    toast(editingCatId ? "Category updated" : "Category added");
+    refresh();
+  } catch (err) { $("#catError").textContent = err.message; }
+});
+
+$("#addCatBtn").addEventListener("click", () => openCatDialog(null));
+
+$("#catRows").addEventListener("click", async (e) => {
+  const btn = e.target.closest("button[data-act]");
+  if (!btn) return;
+  const cat = categories.find((c) => c.id === Number(btn.dataset.id));
+  if (btn.dataset.act === "edit") openCatDialog(cat);
+  if (btn.dataset.act === "filter") {
+    showView("items");
+    $("#category").value = cat.name;
+    loadItems();
+  }
+  if (btn.dataset.act === "delete") {
+    const msg = cat.item_count
+      ? `Delete “${cat.name}”? Its ${cat.item_count} item(s) will be kept but become uncategorised.`
+      : `Delete “${cat.name}”?`;
+    if (!confirm(msg)) return;
+    try { await api(`/api/categories/${cat.id}`, { method: "DELETE" }); toast("Category deleted"); refresh(); }
+    catch (err) { toast(err.message); }
+  }
+});
+
+// ----- wiring -----
+document.querySelectorAll("[data-close]").forEach((b) =>
+  b.addEventListener("click", () => b.closest("dialog").close()));
+
+$("#addBtn").addEventListener("click", () => openItemDialog(null));
+
+$("#rows").addEventListener("click", async (e) => {
+  const el = e.target.closest("[data-act]");
+  if (!el) return;
+  const item = items.find((i) => i.id === Number(el.dataset.id));
+  if (el.dataset.act === "view") openDetail(item);
+  if (el.dataset.act === "edit") openItemDialog(item);
+  if (el.dataset.act === "adjust") openAdjustDialog(item);
+  if (el.dataset.act === "delete" && confirm(`Delete “${item.name}”? This also removes its images and history.`)) {
+    try { await api(`/api/items/${item.id}`, { method: "DELETE" }); toast("Item deleted"); refresh(); }
+    catch (err) { toast(err.message); }
+  }
+});
+
+let searchTimer;
+$("#search").addEventListener("input", () => { clearTimeout(searchTimer); searchTimer = setTimeout(loadItems, 200); });
+$("#category").addEventListener("change", loadItems);
+$("#lowOnly").addEventListener("change", loadItems);
+
+function showView(view) {
+  document.querySelectorAll(".tabs button").forEach((x) => x.classList.toggle("active", x.dataset.view === view));
+  for (const v of ["items", "categories", "history"]) $(`#view-${v}`).hidden = v !== view;
+  if (view === "history") loadHistory().catch((e) => toast(e.message));
+}
+document.querySelectorAll(".tabs button").forEach((b) => b.addEventListener("click", () => showView(b.dataset.view)));
+
+refresh();
+// Keep multiple users on the network roughly in sync.
+setInterval(() => { if (!document.querySelector("dialog[open]")) refresh(); }, 15000);
+</script>
+</body>
+</html>
