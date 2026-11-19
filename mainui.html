@@ -125,6 +125,24 @@
   .gi .qty { font-weight: 600; font-variant-numeric: tabular-nums; }
   .gi .ctl { display: flex; gap: 3px; align-items: center; }
   .group-add { display: grid; grid-template-columns: 1fr 64px auto; gap: 6px; border-top: 1px solid var(--border); padding-top: 10px; }
+  .inline { display: flex; gap: 6px; }
+  .inline input { flex: 1; }
+  label.btn { display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--border);
+              background: var(--panel); border-radius: 7px; padding: 7px 12px; cursor: pointer; font-size: 14px; color: var(--text); }
+  header .right { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  #scanBtn { font-weight: 600; }
+  .scan-sources { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 10px; }
+  .scan-video { width: 100%; max-height: 50vh; border-radius: 10px; background: #000; display: block; margin-bottom: 10px; }
+  .scan-manual { display: flex; gap: 6px; }
+  .scan-manual input { flex: 1; font-size: 16px; }
+  .scan-item { display: grid; grid-template-columns: 96px 1fr; gap: 14px; align-items: start;
+               padding: 12px; border: 1px solid var(--border); border-radius: 10px; margin-top: 12px; }
+  .scan-item img, .scan-item .thumb { width: 96px; height: 96px; border-radius: 8px; object-fit: cover; }
+  .scan-item h4 { margin: 0 0 4px; font-size: 17px; }
+  .scan-item .counts { margin-top: 6px; }
+  .co-row { display: flex; align-items: center; gap: 8px; justify-content: space-between;
+            padding: 6px 0; border-bottom: 1px solid var(--border); }
+  .co-row:last-child { border-bottom: none; }
   #lightbox { padding: 0; width: auto; max-width: 96vw; background: transparent; border: none; }
   #lightbox img { max-width: 96vw; max-height: 90vh; display: block; border-radius: 8px; }
   #toast { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%);
@@ -141,12 +159,15 @@
 <body>
 <header>
   <h1>📦 Inventory</h1>
+  <div class="right">
+  <button class="primary" id="scanBtn" title="Scan a barcode (USB scanners work anywhere on the page)">📷 Scan</button>
   <div class="tabs">
     <button data-view="items" class="active">Items</button>
-    <button data-view="checkout">Tool checkout</button>
+    <button data-view="checkout">Checkout</button>
     <button data-view="groups">Groups</button>
     <button data-view="categories">Categories</button>
     <button data-view="history">History</button>
+  </div>
   </div>
 </header>
 
@@ -155,7 +176,7 @@
     <div class="stat"><div class="label">Items</div><div class="value" id="s-items">–</div></div>
     <div class="stat"><div class="label">Total units</div><div class="value" id="s-units">–</div></div>
     <div class="stat"><div class="label">In use</div><div class="value" id="s-inuse">–</div></div>
-    <div class="stat"><div class="label">Tools out</div><div class="value" id="s-out">–</div></div>
+    <div class="stat"><div class="label">Checked out</div><div class="value" id="s-out">–</div></div>
     <div class="stat"><div class="label">Stock value</div><div class="value" id="s-value">–</div></div>
     <div class="stat"><div class="label">Low stock</div><div class="value" id="s-low">–</div></div>
   </section>
@@ -163,7 +184,7 @@
   <!-- Items -->
   <section id="view-items">
     <div class="toolbar">
-      <input type="search" id="search" placeholder="Search name, SKU, location…">
+      <input type="search" id="search" placeholder="Search name, SKU, barcode, location…">
       <select id="category"><option value="">All categories</option></select>
       <label><input type="checkbox" id="lowOnly"> Low stock only</label>
       <a href="/api/export.csv"><button>Export CSV</button></a>
@@ -207,9 +228,11 @@
   <section id="view-checkout" hidden>
     <div class="co-top">
       <form id="coForm" class="panel">
-        <h3>Check out a tool</h3>
+        <h3>Check out an item</h3>
         <div class="form-grid">
-          <label class="full">Tool *<select name="item_id" id="coTool" required></select></label>
+          <label class="full">Item *
+            <span class="inline"><select name="item_id" id="coTool" required style="flex:1;min-width:0"></select>
+            <button type="button" id="coScanBtn" title="Scan the item's barcode">📷</button></span></label>
           <label>Person *<input name="person" list="peopleList" required placeholder="Who's taking it?"></label>
           <label>Quantity<input name="quantity" type="number" min="1" value="1"></label>
           <label>Due back<input name="due_at" type="datetime-local"></label>
@@ -224,10 +247,10 @@
         <h3>Checked out now <span class="muted" id="coSummary"></span></h3>
         <div class="table-scroll">
           <table>
-            <thead><tr><th>Tool</th><th>Person</th><th class="num">Qty</th><th>Since</th><th>Due</th><th></th></tr></thead>
+            <thead><tr><th>Item</th><th>Person</th><th class="num">Qty</th><th>Since</th><th>Due</th><th></th></tr></thead>
             <tbody id="coOpen"></tbody>
           </table>
-          <div class="empty" id="coOpenEmpty" hidden>Nothing checked out. Every tool is in the room.</div>
+          <div class="empty" id="coOpenEmpty" hidden>Nothing checked out. Everything is in the room.</div>
         </div>
       </div>
     </div>
@@ -236,7 +259,7 @@
       <h3 class="section-title">Tools</h3>
       <input type="search" id="toolSearch" placeholder="Search tools…">
       <span class="spacer"></span>
-      <span class="hint">Items in categories with “Allow checkout” on (set in Categories).</span>
+      <span class="hint">Any item can be checked out. This list shows categories marked as tools (set in Categories).</span>
     </div>
     <div class="table-wrap">
       <table>
@@ -250,7 +273,7 @@
     <h3 class="section-title" style="margin-top:18px">Recently returned</h3>
     <div class="table-wrap">
       <table>
-        <thead><tr><th>Tool</th><th>Person</th><th class="num">Qty</th><th>Out</th><th>Returned</th><th>Notes</th></tr></thead>
+        <thead><tr><th>Item</th><th>Person</th><th class="num">Qty</th><th>Out</th><th>Returned</th><th>Notes</th></tr></thead>
         <tbody id="coReturned"></tbody>
       </table>
       <div class="empty" id="coReturnedEmpty" hidden>No returns yet.</div>
@@ -289,6 +312,9 @@
     <div class="form-grid">
       <label>SKU *<input name="sku" required></label>
       <label>Name *<input name="name" required></label>
+      <label>Barcode
+        <span class="inline"><input name="barcode" id="itemBarcode" placeholder="Scan or type" autocomplete="off">
+        <button type="button" id="itemScanBtn" title="Scan with camera">📷</button></span></label>
       <label>Category<select name="category" id="itemCategory"></select></label>
       <label>Location<input name="location" placeholder="e.g. Shelf A3"></label>
       <label>Quantity<input name="quantity" type="number" min="0" value="0"></label>
@@ -361,7 +387,7 @@
       <label>Default reorder level<input name="default_reorder_level" type="number" min="0" value="0"></label>
       <label>Default location<input name="default_location" placeholder="e.g. Aisle 2"></label>
       <label class="full check"><input name="checkout" type="checkbox">
-        <span><strong>Allow checkout</strong> — items in this category appear on the Tool checkout page</span></label>
+        <span><strong>Tool category</strong>: items show in the Tools list on the Checkout page (any item can still be checked out)</span></label>
     </div>
     <p class="hint">New items in this category start with these defaults. Renaming a category also updates every item in it.</p>
     <div class="error" id="catError"></div>
@@ -388,9 +414,29 @@
   </form>
 </dialog>
 
+<!-- Barcode scanner -->
+<dialog id="scanDialog" class="wide">
+  <h2 id="scanTitle">Scan barcode</h2>
+  <video id="scanVideo" class="scan-video" playsinline muted hidden></video>
+  <div class="scan-sources">
+    <button type="button" id="scanLiveBtn">📷 Live camera</button>
+    <label class="btn">📸 Photo of barcode<input type="file" id="scanPhoto" accept="image/*" capture="environment" hidden></label>
+  </div>
+  <form id="scanForm" class="scan-manual">
+    <input id="scanInput" placeholder="Type a code, or scan with a USB scanner" autocomplete="off" autocapitalize="off">
+    <button type="submit" class="primary">Find</button>
+  </form>
+  <p class="hint" id="scanHint"></p>
+  <div id="scanResult"></div>
+  <div class="dialog-actions">
+    <button type="button" data-close>Close</button>
+  </div>
+</dialog>
+
 <dialog id="lightbox"><img alt=""></dialog>
 <div id="toast"></div>
 
+<script src="/static/vendor/zxing-0.21.3.min.js" defer></script>
 <script>
 const $ = (s) => document.querySelector(s);
 const money = (n) => Number(n).toLocaleString(undefined, { style: "currency", currency: "USD" });
@@ -517,7 +563,7 @@ async function loadItems() {
       : '<span class="muted">—</span>';
     return `<tr class="${low ? "low" : ""}">
       <td>${thumb}</td>
-      <td>${esc(i.sku)}</td>
+      <td>${esc(i.sku)}${i.barcode ? `<div class="hint">▮ ${esc(i.barcode)}</div>` : ""}</td>
       <td><button class="link" data-act="view" data-id="${i.id}">${esc(i.name)}</button>${low ? '<span class="badge">low</span>' : ""}</td>
       <td>${chip(i.category, i.category_color)}</td>
       <td>${esc(i.location) || '<span class="muted">—</span>'}</td>
@@ -529,7 +575,7 @@ async function loadItems() {
       <td class="num">${money(i.quantity * i.unit_price)}</td>
       <td>${links}</td>
       <td><div class="actions">
-        ${i.is_tool ? `<button class="sm" data-act="checkout" data-id="${i.id}">Check out</button>` : ""}
+        <button class="sm" data-act="checkout" data-id="${i.id}" ${i.available ? "" : "disabled"}>Check out</button>
         <button class="sm" data-act="adjust" data-id="${i.id}">Stock / Use</button>
         <button class="sm" data-act="edit" data-id="${i.id}">Edit</button>
         <button class="sm danger" data-act="delete" data-id="${i.id}">Delete</button>
@@ -702,8 +748,8 @@ function openItemDialog(item) {
   const f = $("#itemForm");
   f.reset();
   fillCategorySelect(item?.category);
-  if (item) for (const k of ["sku", "name", "location", "quantity", "reorder_level", "unit_price", "notes"])
-    f.elements[k].value = item[k];
+  if (item) for (const k of ["sku", "barcode", "name", "location", "quantity", "reorder_level", "unit_price", "notes"])
+    f.elements[k].value = item[k] ?? "";
   $("#linkRows").innerHTML = "";
   (item?.links || []).forEach((l) => addLinkRow(l));
   galleryExisting = item ? [...item.images] : [];
@@ -755,6 +801,7 @@ async function openDetail(item) {
     <h3>Details</h3>
     <dl class="kv">
       <dt>Category</dt><dd>${chip(item.category, item.category_color)}</dd>
+      ${item.barcode ? `<dt>Barcode</dt><dd>${esc(item.barcode)}</dd>` : ""}
       <dt>Location</dt><dd>${esc(item.location) || "—"}</dd>
       <dt>Quantity</dt><dd><strong>${item.available}</strong> available · ${item.in_use} in use · ${item.quantity} total (reorder at ${item.reorder_level})</dd>
       ${item.usage.length ? `<dt>In use by</dt><dd>${item.usage.map((u) =>
@@ -836,7 +883,7 @@ $("#adjustForm").addEventListener("submit", async (e) => {
   } catch (err) { $("#adjustError").textContent = err.message; }
 });
 
-// ----- tool checkout -----
+// ----- checkout (any item; tools listed separately) -----
 let tools = [];
 let openCheckouts = [];
 
@@ -845,20 +892,23 @@ const fmtDate = (s) => s ? new Date(s).toLocaleString(undefined,
 const isOverdue = (c) => c.due_at && !c.returned_at && new Date(c.due_at) < new Date();
 
 async function loadCheckout() {
-  const [t, open, returned, people] = await Promise.all([
-    api("/api/items?tools=1"),
+  const [all, open, returned, people] = await Promise.all([
+    api("/api/items"),
     api("/api/checkouts?status=open"),
     api("/api/checkouts?status=returned&limit=25"),
     api("/api/people"),
   ]);
-  tools = t;
+  tools = all.filter((x) => x.is_tool);
   openCheckouts = open;
   $("#peopleList").innerHTML = people.map((p) => `<option value="${esc(p)}">`).join("");
 
-  // Tool picker keeps its selection across refreshes.
+  // Item picker (tools first) keeps its selection across refreshes.
   const sel = $("#coTool"), current = sel.value;
-  sel.innerHTML = '<option value="">Choose a tool…</option>' + tools.map((x) =>
-    `<option value="${x.id}" ${x.available ? "" : "disabled"}>${esc(x.name)} — ${x.available} available${x.location ? ` · ${esc(x.location)}` : ""}</option>`).join("");
+  const opt = (x) => `<option value="${x.id}" ${x.available ? "" : "disabled"}>${esc(x.name)} — ${x.available} available${x.location ? ` · ${esc(x.location)}` : ""}</option>`;
+  const others = all.filter((x) => !x.is_tool);
+  sel.innerHTML = '<option value="">Choose an item…</option>' +
+    (tools.length ? `<optgroup label="Tools">${tools.map(opt).join("")}</optgroup>` : "") +
+    (others.length ? `<optgroup label="Other items">${others.map(opt).join("")}</optgroup>` : "");
   sel.value = current;
 
   const overdue = open.filter(isOverdue).length;
@@ -888,7 +938,7 @@ async function loadCheckout() {
 
 function renderTools() {
   const q = $("#toolSearch").value.trim().toLowerCase();
-  const list = tools.filter((t) => !q || [t.name, t.sku, t.location].some((v) => (v || "").toLowerCase().includes(q)));
+  const list = tools.filter((t) => !q || [t.name, t.sku, t.barcode, t.location].some((v) => (v || "").toLowerCase().includes(q)));
   $("#toolEmpty").hidden = list.length > 0;
   $("#toolRows").innerHTML = list.map((t) => {
     const status = t.available === 0
@@ -947,6 +997,247 @@ $("#coOpen").addEventListener("click", async (e) => {
     toast(`${c.item_name} returned`);
     refresh();
   } catch (err) { toast(err.message); }
+});
+
+// ----- barcode scanning -----
+// Three inputs feed handleCode(): USB/Bluetooth scanners (they type fast and press Enter),
+// the live camera (needs https or localhost), and a photo (works on plain http too).
+let scanPick = null;      // when set, a scan fills in a field instead of looking the item up
+let cameraReader = null;
+let scanItem = null;      // item shown in the scan result
+
+function zxingHints() {
+  const hints = new Map();
+  hints.set(ZXing.DecodeHintType.TRY_HARDER, true);
+  return hints;
+}
+
+function openScanner(onPick = null, title = "Scan barcode") {
+  scanPick = onPick;
+  $("#scanTitle").textContent = title;
+  $("#scanInput").value = "";
+  $("#scanResult").innerHTML = "";
+  const liveOk = window.isSecureContext && navigator.mediaDevices?.getUserMedia;
+  $("#scanLiveBtn").hidden = !liveOk;
+  $("#scanHint").textContent = liveOk
+    ? "Use the camera, take a photo, or scan with a USB scanner."
+    : "Take a photo of the barcode, or scan with a USB scanner. (Live camera needs https or localhost.)";
+  if (!$("#scanDialog").open) $("#scanDialog").showModal();
+  $("#scanInput").focus();
+}
+
+function stopCamera() {
+  if (cameraReader) { cameraReader.reset(); cameraReader = null; }
+  $("#scanVideo").hidden = true;
+  $("#scanLiveBtn").textContent = "📷 Live camera";
+}
+$("#scanDialog").addEventListener("close", () => { stopCamera(); scanPick = null; });
+
+$("#scanLiveBtn").addEventListener("click", async () => {
+  if (cameraReader) return stopCamera();
+  if (!window.ZXing) return toast("Scanner is still loading, try again in a second");
+  cameraReader = new ZXing.BrowserMultiFormatReader(zxingHints());
+  $("#scanVideo").hidden = false;
+  $("#scanLiveBtn").textContent = "■ Stop camera";
+  try {
+    await cameraReader.decodeFromConstraints(
+      { video: { facingMode: "environment" } }, $("#scanVideo"),
+      (result) => { if (result) { stopCamera(); handleCode(result.getText()); } });
+  } catch (err) {
+    stopCamera();
+    $("#scanHint").textContent = "Couldn't start the camera: " + err.message;
+  }
+});
+
+// Decode a still photo. Phone photos are large, so try a couple of downscaled sizes.
+async function decodePhoto(file) {
+  const url = URL.createObjectURL(file);
+  try {
+    const img = await new Promise((ok, fail) => {
+      const im = new Image(); im.onload = () => ok(im); im.onerror = () => fail(new Error("Couldn't read that image")); im.src = url;
+    });
+    const reader = new ZXing.BrowserMultiFormatReader(zxingHints());
+    for (const max of [1600, 1000, 2400]) {
+      const scale = Math.min(1, max / Math.max(img.naturalWidth, img.naturalHeight));
+      const c = document.createElement("canvas");
+      c.width = Math.round(img.naturalWidth * scale);
+      c.height = Math.round(img.naturalHeight * scale);
+      c.getContext("2d").drawImage(img, 0, 0, c.width, c.height);
+      try { return (await reader.decodeFromImageUrl(c.toDataURL("image/jpeg", 0.92))).getText(); }
+      catch { /* try the next size */ }
+    }
+    return null;
+  } finally { URL.revokeObjectURL(url); }
+}
+
+$("#scanPhoto").addEventListener("change", async (e) => {
+  const file = e.target.files[0];
+  e.target.value = "";
+  if (!file) return;
+  if (!window.ZXing) return toast("Scanner is still loading, try again in a second");
+  $("#scanHint").textContent = "Reading barcode…";
+  const code = await decodePhoto(file).catch(() => null);
+  if (code) handleCode(code);
+  else $("#scanHint").textContent = "No barcode found. Try again closer, in good light, with the barcode filling most of the photo.";
+});
+
+$("#scanForm").addEventListener("submit", (e) => {
+  e.preventDefault();
+  const code = $("#scanInput").value.trim();
+  if (code) handleCode(code);
+});
+
+async function handleCode(code) {
+  code = code.trim();
+  $("#scanInput").value = code;
+  if (scanPick) {
+    const pick = scanPick;
+    $("#scanDialog").close();
+    return pick(code);
+  }
+  $("#scanHint").textContent = `Scanned: ${code}`;
+  try {
+    const res = await fetch("/api/lookup?code=" + encodeURIComponent(code));
+    const data = await res.json();
+    if (res.status === 404) return renderScanNotFound(code);
+    if (!res.ok) throw new Error(data.error);
+    scanItem = data.item;
+    renderScanItem(data.item, data.open_checkouts);
+  } catch (err) { $("#scanResult").innerHTML = `<p class="error">${esc(err.message)}</p>`; }
+}
+
+function renderScanItem(it, open) {
+  const img = it.images[0];
+  $("#scanResult").innerHTML = `
+    <div class="scan-item">
+      ${img ? `<img src="${esc(img.url)}" alt="">` : '<div class="thumb none">·</div>'}
+      <div>
+        <h4>${esc(it.name)}</h4>
+        <div class="muted">${esc(it.sku)}${it.barcode ? ` · ▮ ${esc(it.barcode)}` : ""}${it.location ? ` · ${esc(it.location)}` : ""}</div>
+        <div style="margin-top:4px">${chip(it.category, it.category_color)}</div>
+        <div class="counts"><strong>${it.available}</strong> available · ${it.in_use} in use · ${it.checked_out} checked out · ${it.quantity} total</div>
+      </div>
+    </div>
+    ${open.length ? `<h3>Checked out now</h3>${open.map((c) => `<div class="co-row">
+        <span><strong>${esc(c.person)}</strong> · ${c.quantity}× · since ${fmtDate(c.checked_out_at)}${isOverdue(c) ? ' <span class="status out">overdue</span>' : ""}</span>
+        <button class="sm primary" data-scan-return="${c.id}">Return</button></div>`).join("")}` : ""}
+    <h3>Check out</h3>
+    ${it.available ? `<form id="scanCoForm" class="form-grid">
+        <label>Person *<input name="person" list="peopleList" required placeholder="Who's taking it?"></label>
+        <label>Quantity<input name="quantity" type="number" min="1" max="${it.available}" value="1"></label>
+        <label>Due back<input name="due_at" type="datetime-local"></label>
+        <label>Note<input name="note"></label>
+        <div class="full" style="display:flex;justify-content:flex-end"><button class="primary">Check out</button></div>
+      </form>` : '<p class="muted">None available to check out.</p>'}
+    <div class="dialog-actions" style="justify-content:flex-start">
+      <button type="button" class="sm" data-scan-act="adjust">Stock / Use…</button>
+      <button type="button" class="sm" data-scan-act="view">Details</button>
+      <button type="button" class="sm" data-scan-act="edit">Edit</button>
+    </div>`;
+  const person = $("#scanCoForm")?.elements.person;
+  if (person) person.focus();
+}
+
+function renderScanNotFound(code) {
+  scanItem = null;
+  $("#scanResult").innerHTML = `
+    <p><strong>No item has the barcode “${esc(code)}” yet.</strong></p>
+    <div class="dialog-actions" style="justify-content:flex-start;margin-top:0">
+      <button type="button" class="primary" data-scan-act="new">+ Add new item with this barcode</button>
+    </div>
+    <h3>Or give this barcode to an existing item</h3>
+    <div class="scan-manual">
+      <select id="scanAssign" style="flex:1;min-width:0">
+        <option value="">Choose item…</option>
+        ${allItems.map((i) => `<option value="${i.id}">${esc(i.name)} (${esc(i.sku)})${i.barcode ? " · has a barcode" : ""}</option>`).join("")}
+      </select>
+      <button type="button" data-scan-act="assign">Assign</button>
+    </div>`;
+  $("#scanResult").dataset.code = code;
+}
+
+$("#scanResult").addEventListener("submit", async (e) => {
+  if (e.target.id !== "scanCoForm") return;
+  e.preventDefault();
+  const body = { ...Object.fromEntries(new FormData(e.target)), item_id: scanItem.id };
+  try {
+    const c = await api("/api/checkouts", { method: "POST", body });
+    toast(`${c.item_name} checked out to ${c.person}`);
+    refresh();
+    handleCode(scanItem.barcode || scanItem.sku);
+  } catch (err) { toast(err.message); }
+});
+
+$("#scanResult").addEventListener("click", async (e) => {
+  const ret = e.target.closest("[data-scan-return]");
+  const act = e.target.closest("[data-scan-act]")?.dataset.scanAct;
+  try {
+    if (ret) {
+      const note = prompt("Returning. Any note? (optional)", "");
+      if (note === null) return;
+      const c = await api(`/api/checkouts/${ret.dataset.scanReturn}/return`, { method: "POST", body: { note } });
+      toast(`${c.item_name} returned`);
+      refresh();
+      return handleCode(scanItem.barcode || scanItem.sku);
+    }
+    if (!act) return;
+    const code = $("#scanResult").dataset.code;
+    if (act === "new") {
+      $("#scanDialog").close();
+      openItemDialog(null);
+      $("#itemBarcode").value = code;
+    }
+    if (act === "assign") {
+      const id = Number($("#scanAssign").value);
+      if (!id) return toast("Choose an item first");
+      await api(`/api/items/${id}`, { method: "PUT", body: { barcode: code } });
+      toast("Barcode assigned");
+      refresh();
+      handleCode(code);
+    }
+    const it = scanItem;
+    if (act === "adjust") { $("#scanDialog").close(); openAdjustDialog(it); }
+    if (act === "view") { $("#scanDialog").close(); openDetail(it); }
+    if (act === "edit") { $("#scanDialog").close(); openItemDialog(it); }
+  } catch (err) { toast(err.message); }
+});
+
+$("#scanBtn").addEventListener("click", () => openScanner());
+
+$("#itemScanBtn").addEventListener("click", () =>
+  openScanner((code) => { $("#itemBarcode").value = code; }, "Scan barcode for this item"));
+// A USB scanner presses Enter after the code; don't let that submit the item form.
+$("#itemBarcode").addEventListener("keydown", (e) => { if (e.key === "Enter") e.preventDefault(); });
+
+$("#coScanBtn").addEventListener("click", () =>
+  openScanner(async (code) => {
+    try {
+      const { item } = await api("/api/lookup?code=" + encodeURIComponent(code));
+      if (!item.available) return toast(`${item.name}: none available to check out`);
+      $("#coTool").value = item.id;
+      $("#coForm").elements.person.focus();
+    } catch (err) { toast(err.message); }
+  }, "Scan item to check out"));
+
+// USB/Bluetooth scanners act as a keyboard: characters arrive a few ms apart, then Enter.
+// Outside text fields, catch that burst and treat it as a scan from anywhere in the app.
+let wedgeBuf = "", wedgeLast = 0;
+document.addEventListener("keydown", (e) => {
+  if (e.target.closest?.("input, textarea, select, [contenteditable]")) return;
+  const t = performance.now();
+  if (t - wedgeLast > 80) wedgeBuf = "";
+  wedgeLast = t;
+  if (e.key === "Enter") {
+    if (wedgeBuf.length >= 4) {
+      e.preventDefault();
+      const code = wedgeBuf;
+      if (!$("#scanDialog").open) openScanner();
+      handleCode(code);
+    }
+    wedgeBuf = "";
+  } else if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) {
+    wedgeBuf += e.key;
+  }
 });
 
 // ----- groups -----

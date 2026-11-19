@@ -20,12 +20,23 @@ python3 -m venv .venv
 The server prints both addresses. Open `http://<LAN-IP>:8000` on any phone or computer on the same Wi-Fi.
 If macOS asks whether to allow incoming connections for Python, click **Allow**.
 
+## Barcode scanning
+
+Click **📷 Scan** in the header, or just scan with a USB/Bluetooth barcode scanner anywhere on the page.
+
+- **USB/Bluetooth scanner:** works everywhere.
+- **Photo of barcode:** works on any phone, even over plain `http://`.
+- **Live camera:** browsers only allow it on `https://` or `http://localhost`, so on other devices use the photo option.
+
+A scanned code is matched against an item's **Barcode**, then its **SKU**. Unknown codes can be added as a new item or assigned to an existing one.
+
 ## Files
 
 - `app.py`: the server and JSON API
 - `mainui.html`: the web UI
 - `inventory.db`: your data, created on first run
 - `uploads/`: item images
+- `static/vendor/`: the barcode-reading library (ZXing 0.21.3, Apache-2.0), kept locally so scanning works without internet
 
 To back up, copy both `inventory.db` and `uploads/`.
 
@@ -43,7 +54,8 @@ To back up, copy both `inventory.db` and `uploads/`.
 | PUT/DELETE | `/api/groups/<id>` | Rename or delete a group (deleting returns its items to available) |
 | POST | `/api/items/<id>/images` | Upload images (multipart field `images`, can repeat) |
 | DELETE | `/api/images/<id>` | Delete one image |
-| GET | `/api/items?tools=1` | Only items in categories with checkout allowed |
+| GET | `/api/items?tools=1` | Only items in categories with "Tool category" on |
+| GET | `/api/lookup?code=` | Find the item for a scanned code (matches barcode, then SKU) |
 | GET | `/api/checkouts?status=open\|returned\|all&item_id=` | Tool checkouts |
 | POST | `/api/checkouts` | Check out: `{"item_id": 3, "person": "Sam", "quantity": 1, "due_at": "2026-11-20T17:00", "note": ""}` |
 | POST | `/api/checkouts/<id>/return` | Check a tool back in, optional `{"note": "..."}` |

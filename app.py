@@ -109,7 +109,7 @@ LEFT JOIN (SELECT item_id, SUM(quantity) AS n FROM checkouts
        ON c.item_id = i.id;
 """
 
-ITEM_FIELDS = ("sku", "name", "category", "location", "quantity",
+ITEM_FIELDS = ("sku", "barcode", "name", "category", "location", "quantity",
                "reorder_level", "unit_price", "notes")
 CATEGORY_FIELDS = ("name", "color", "description",
                    "default_reorder_level", "default_location", "checkout")
@@ -150,6 +150,12 @@ def init_db():
                        "VALUES ('Tools', '#d97706', 'Site room', 1)")
             db.execute("UPDATE categories SET checkout = 1 WHERE name = 'Tools'")
             db.execute("PRAGMA user_version = 1")
+        # items.barcode: optional, unique when set. Scans match barcode or SKU.
+        cols = [r[1] for r in db.execute("PRAGMA table_info(items)")]
+        if "barcode" not in cols:
+            db.execute("ALTER TABLE items ADD COLUMN barcode TEXT NOT NULL DEFAULT ''")
+        db.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_items_barcode "
+                   "ON items(barcode COLLATE NOCASE) WHERE barcode != ''")
         db.executescript(ITEM_VIEW)
         # Categories typed on items before category config existed.
         db.execute(
@@ -242,6 +248,13 @@ def clean_category(data, partial=False):
     return out, None
 
 
+def duplicate_error(exc, data):
+    """Turn a UNIQUE failure on items into a readable message."""
+    if "barcode" in str(exc):
+        return f"Barcode '{data.get('barcode')}' is already used by another item"
+    return f"SKU '{data.get('sku')}' already exists"
+
+
 def ensure_category(db, name):
     if name:
         db.execute("INSERT OR IGNORE INTO categories (name) VALUES (?)", (name,))
@@ -328,8 +341,9 @@ def list_items():
     sql = "SELECT * FROM item_view WHERE 1=1"
     params = []
     if q:
-        sql += " AND (name LIKE ? OR sku LIKE ? OR location LIKE ? OR notes LIKE ?)"
-        params += [f"%{q}%"] * 4
+        sql += (" AND (name LIKE ? OR sku LIKE ? OR barcode LIKE ? "
+                "OR location LIKE ? OR notes LIKE ?)")
+        params += [f"%{q}%"] * 5
     if category:
         sql += " AND category = ? COLLATE NOCASE"
         params.append(category)
@@ -363,8 +377,8 @@ def create_item():
             f"INSERT INTO items ({', '.join(cols)}) VALUES ({', '.join('?' * len(cols))})",
             vals,
         )
-    except sqlite3.IntegrityError:
-        return jsonify(error=f"SKU '{data['sku']}' already exists"), 409
+    except sqlite3.IntegrityError as exc:
+        return jsonify(error=duplicate_error(exc, data)), 409
     ensure_category(db, data.get("category"))
     if links:
         save_links(db, cur.lastrowid, links)
@@ -372,6 +386,23 @@ def create_item():
         log_movement(db, cur.lastrowid, data["quantity"], "Initial stock", data["quantity"])
     db.commit()
     return jsonify(fetch_item(db, cur.lastrowid)), 201
+
+
+@app.get("/api/lookup")
+def lookup_code():
+    """Find the item for a scanned code: barcode first, then SKU."""
+    code = request.args.get("code", "").strip()
+    if not code:
+        return jsonify(error="code is required"), 400
+    db = get_db()
+    row = (db.execute("SELECT id FROM items WHERE barcode = ? COLLATE NOCASE", (code,)).fetchone()
+           or db.execute("SELECT id FROM items WHERE sku = ? COLLATE NOCASE", (code,)).fetchone())
+    if not row:
+        return jsonify(error=f"No item with barcode or SKU '{code}'", code=code), 404
+    open_checkouts = [checkout_json(r) for r in db.execute(
+        CHECKOUT_SELECT + " WHERE c.item_id = ? AND c.returned_at IS NULL "
+        "ORDER BY c.checked_out_at", (row["id"],))]
+    return jsonify(item=fetch_item(db, row["id"]), open_checkouts=open_checkouts)
 
 
 @app.get("/api/items/<int:item_id>")
@@ -407,8 +438,8 @@ def update_item(item_id):
                 f"UPDATE items SET {', '.join(f'{k} = ?' for k in data)} WHERE id = ?",
                 [*data.values(), item_id],
             )
-        except sqlite3.IntegrityError:
-            return jsonify(error=f"SKU '{data.get('sku')}' already exists"), 409
+        except sqlite3.IntegrityError as exc:
+            return jsonify(error=duplicate_error(exc, data)), 409
         ensure_category(db, data.get("category"))
         if "quantity" in data and data["quantity"] != old["quantity"]:
             log_movement(db, item_id, data["quantity"] - old["quantity"],
@@ -622,7 +653,7 @@ def delete_group(group_id):
     return jsonify(ok=True)
 
 
-# ---------- tool checkout API ----------
+# ---------- checkout API (tools and any other item) ----------
 
 CHECKOUT_SELECT = (
     "SELECT c.*, i.name AS item_name, i.sku, i.location, "
@@ -684,7 +715,7 @@ def create_checkout():
     db = get_db()
     item = db.execute("SELECT * FROM item_view WHERE id = ?", (item_id,)).fetchone()
     if not item:
-        return jsonify(error="Tool not found"), 404
+        return jsonify(error="Item not found"), 404
     if qty > item["available"]:
         return jsonify(error=f"Only {item['available']} available"), 400
     note = str(body.get("note", "")).strip()
@@ -931,6 +962,7 @@ if __name__ == "__main__":
 
     try:
         from waitress import serve  # production-grade server if installed
-        serve(app, host=args.host, port=args.port)
+        # The page loads several things at once; extra threads avoid queueing.
+        serve(app, host=args.host, port=args.port, threads=16)
     except ImportError:
         app.run(host=args.host, port=args.port, debug=args.debug)
